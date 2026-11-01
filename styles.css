@@ -240,3 +240,26 @@ body.dropping::after {
 .sentence { flex-wrap: nowrap; }
 .sentence .grow { flex: 1; min-width: 0; max-width: none !important; }
 .sentence select[name=mode] { flex: 1; min-width: 0; }
+
+/* Receipt reading + location */
+.drop { background: var(--paper); }
+.scan { font-size: 13.5px; line-height: 1.5; border-radius: 10px; padding: 9px 11px; background: var(--card); border: 1px solid var(--line); }
+.scan.ok { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
+.scan.warn { border-color: color-mix(in srgb, var(--owe) 40%, var(--line)); background: var(--owe-soft); }
+.scan .link { margin-top: 4px; font-size: 13.5px; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; margin-right: 4px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.in.auto { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 55%, var(--paper)); }
+.in.need { border-color: var(--owe); background: color-mix(in srgb, var(--owe-soft) 60%, var(--paper)); }
+.loc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-size: 13.5px; color: var(--muted); }
+.loc span { font-family: var(--mono); color: var(--ink); }
+.loc small { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--muted); }
+.loc a, .daymap a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.kv small.sub { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; max-width: 34ch; }
+.kv { align-items: center; }
+.daymap { margin-bottom: 10px; overflow: hidden; }
+.daymap svg { display: block; width: 100%; height: auto; }
+.spots { margin: 8px 0 0; padding: 0 16px 0 36px; font-size: 14px; display: grid; gap: 3px; }
+.spots small { color: var(--muted); font-family: var(--mono); }
+.section-h .link { font-size: 13.5px; text-transform: none; letter-spacing: 0; }
+.kv .btn { white-space: nowrap; flex: none; }

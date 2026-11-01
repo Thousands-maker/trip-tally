@@ -189,6 +189,60 @@ function openSheet(title, body, { submit = 'Save', onSubmit, extra = '', onMount
 }
 sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); });
 
+/* ---------- where you are: currency guess + optional location trail ---------- */
+const settings = () => (S.settings || (S.settings = {}));
+function localCurrency(g) { // abroad (phone's time zone uses another currency)? default to that
+  const c = tzCurrency();
+  return c && validCur(c) && c !== g.base ? c : (g.lastCur || g.base);
+}
+const trailOn = () => !!settings().trail;
+function getPos(maxAge = 60e3) {
+  return new Promise(res => {
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(
+      p => res({ lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy), t: Date.now() }),
+      () => res(null), { enableHighAccuracy: false, timeout: 20000, maximumAge: maxAge });
+  });
+}
+const metres = (a, b) => { const r = Math.PI / 180, x = (b.lon - a.lon) * r * Math.cos((a.lat + b.lat) / 2 * r), y = (b.lat - a.lat) * r; return Math.hypot(x, y) * 6371e3; };
+async function recordPoint() {
+  if (!trailOn() || document.hidden) return null;
+  const p = await getPos();
+  if (!p) return null;
+  const tr = S.trail || (S.trail = []), last = tr[tr.length - 1];
+  if (last && p.t - last.t < 4 * 60e3 && metres(last, p) < 60) return last; // nothing new
+  tr.push(p);
+  const cutoff = Date.now() - 180 * 864e5;
+  S.trail = tr.filter(x => x.t > cutoff).slice(-10000);
+  save();
+  return p;
+}
+function nearestTrail(ts, within) {
+  let best = null;
+  for (const p of S.trail || []) { const d = Math.abs(p.t - ts); if (d <= within && (!best || d < best.d)) best = { ...p, d }; }
+  return best;
+}
+let trailTimer = null;
+function startTrail() {
+  clearInterval(trailTimer); trailTimer = null;
+  if (!trailOn()) return;
+  recordPoint(); trailTimer = setInterval(recordPoint, 5 * 60e3);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) recordPoint(); });
+
+/* receipt reader: fetch it once (while online) so it also works offline */
+function markOcrReady() { if (!settings().ocrReady) { settings().ocrReady = true; save(); } }
+async function preloadOcr(g, onStatus = () => {}) {
+  const langs = g?.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([tzCurrency(), g?.base, ...Object.keys(g?.rates || {})].filter(Boolean));
+  try {
+    onStatus('Downloading receipt reader…');
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    await ocrImage(c, langs, m => onStatus(/recogn/.test(m.status) ? 'Almost ready…' : `Downloading receipt reader… ${Math.round((m.progress || 0) * 100)}%`));
+    markOcrReady(); onStatus(`Ready offline (${langs.map(l => OCR_LANGS[l]).join(', ')})`);
+    return true;
+  } catch (e) { onStatus('Couldn’t download — try again when online'); return false; }
+}
+
 /* ---------- drag & drop receipts ---------- */
 let activeDrop = null, currentGroup = null;
 const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
@@ -246,6 +300,10 @@ function renderHome() {
     <div class="card">
       <div class="kv"><span>Stored on</span><span class="zero">This device only</span></div>
       <div class="kv"><span>Storage protection</span><span id="persist" class="zero">Checking…</span></div>
+      <div class="kv"><span>Location trail<small class="sub">Notes where you are while Trip Tally is open, so receipts get tagged with where you spent. Stays on this phone.</small></span>
+        <button class="btn small${trailOn() ? ' primary' : ''}" id="trailBtn">${trailOn() ? 'On' : 'Off'}</button></div>
+      <div class="kv"><span>Receipt reader<small class="sub" id="ocrStatus">${settings().ocrReady ? 'Downloaded — works offline' : 'Downloads once (about 10 MB), then works offline'}</small></span>
+        <button class="btn small" id="ocrBtn">${settings().ocrReady ? 'Refresh' : 'Get it'}</button></div>
       <div class="pad btn-row" style="border-top:1px solid var(--line)">
         <button class="btn small" id="exportAll">Back up to file</button>
         <button class="btn small" id="importAll">Restore from file</button>
@@ -255,6 +313,13 @@ function renderHome() {
 
   $('#newGroup').onclick = newGroupSheet;
   $('#exportAll').onclick = exportAll;
+  $('#trailBtn').onclick = async () => {
+    if (trailOn()) { settings().trail = false; save(); startTrail(); return route(); }
+    const p = await getPos(0);
+    if (!p) return toast('Location permission is needed — allow it in your browser settings');
+    settings().trail = true; S.trail = [...(S.trail || []), p]; save(); startTrail(); toast('Location trail on'); route();
+  };
+  $('#ocrBtn').onclick = () => preloadOcr(S.groups[0], m => { const el = $('#ocrStatus'); if (el) el.textContent = m; });
   $('#importAll').onclick = () => $('#importFile').click();
   checkPersist();
 }
@@ -288,6 +353,7 @@ function newGroupSheet() {
       const me = { id: uid(), name: meName };
       const g = { id: uid(), name, base, members: [me, ...others.map(n => ({ id: uid(), name: n }))], me: me.id, rates: {}, tx: [], createdAt: Date.now() };
       S.groups.unshift(g); save();
+      if (navigator.onLine && !settings().ocrReady) setTimeout(() => preloadOcr(g), 1500);
       location.hash = `#/g/${g.id}`;
     },
     onMount: () => sheetForm.elements.name.focus()
@@ -320,7 +386,12 @@ function activityTab(g) {
   for (const t of sorted) {
     const d = new Date(t.date + 'T00:00:00');
     const mk = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-    if (mk !== lastMonth) { html += `${lastMonth ? '</ul>' : ''}<div class="section-h"><h2>${esc(mk)}</h2></div><ul class="list card">`; lastMonth = mk; }
+    if (mk !== lastMonth) {
+      const hasPlaces = g.tx.some(x => x.date === t.date && x.loc) || dayTrail(t.date).length;
+      html += `${lastMonth ? '</ul>' : ''}<div class="section-h"><h2>${esc(mk)}</h2>${hasPlaces ? `<button class="link" data-route="${t.date}">🗺 Day route</button>` : ''}</div>
+        <div class="daymap card" data-dm="${t.date}" hidden></div><ul class="list card">`;
+      lastMonth = mk;
+    }
     const fd = fmtDate(t.date), eff = myEffect(g, t);
     const conv = t.currency !== g.base ? `<small>≈ ${fmt(inBase(g, t), g.base)}</small>` : '';
     let title, sub, right;
@@ -331,7 +402,7 @@ function activityTab(g) {
     } else {
       title = esc(t.desc || 'Expense');
       const n = Object.keys(sharesOf(t)).length, M = g.members.length;
-      sub = `${esc(mname(g, t.paidBy))} paid ${fmt(t.amount, t.currency)}<br>${t.split.mode === 'items' ? `Itemised · ${t.split.items.length} item${t.split.items.length === 1 ? '' : 's'}, ${n} of ${M} people` : n === M ? 'Split with everyone' : n === 1 ? 'For ' + esc(mname(g, Object.keys(sharesOf(t))[0])) + ' only' : `Split ${n} of ${M} ways`}${(t.receipts || []).length ? ' · 📎' : ''}`;
+      sub = `${esc(mname(g, t.paidBy))} paid ${fmt(t.amount, t.currency)}<br>${t.split.mode === 'items' ? `${t.split.items.length} items · ${n} of ${M} people` : n === M ? 'Split with everyone' : n === 1 ? 'For ' + esc(mname(g, Object.keys(sharesOf(t))[0])) + ' only' : `Split ${n} of ${M} ways`}${(t.receipts || []).length ? ' · 📎' : ''}${t.loc ? ' · 📍' : ''}`;
       const cls = eff > 0 ? 'pos' : eff < 0 ? 'neg' : 'zero';
       const lab = !g.me ? '' : eff > 0 ? 'you lent' : eff < 0 ? 'you borrowed' : 'not involved';
       right = `<span class="amt ${cls}">${g.me && Math.abs(eff) > 1e-9 ? fmt(Math.abs(eff), g.base) : (g.me ? '' : fmt(t.amount, t.currency))}<small>${lab || (t.currency !== g.base ? '≈ ' + fmt(inBase(g, t), g.base) : '')}</small></span>`;
@@ -340,6 +411,37 @@ function activityTab(g) {
       <span class="grow"><span class="t" style="display:block">${title}</span><span class="s" style="display:block">${sub}</span></span>${right}</button></li>`;
   }
   return html + '</ul>';
+}
+
+function dayTrail(iso) {
+  const a = new Date(iso + 'T00:00:00').getTime(), b = a + 864e5;
+  return (S.trail || []).filter(p => p.t >= a && p.t < b);
+}
+function dayMap(g, iso) { // offline sketch of the day: trail line + numbered spending spots
+  const trail = dayTrail(iso);
+  const spots = g.tx.filter(t => t.date === iso && t.loc && t.type !== 'payment')
+    .sort((a, b) => (a.time || '').localeCompare(b.time || '') || a.createdAt - b.createdAt);
+  const pts = [...trail, ...spots.map(t => t.loc)];
+  if (!pts.length) return '<p class="note">No places recorded for this day.</p>';
+  const lat0 = pts.reduce((a, p) => a + p.lat, 0) / pts.length, kx = Math.cos(lat0 * Math.PI / 180);
+  const X = p => p.lon * kx, Y = p => -p.lat;
+  const xs = pts.map(X), ys = pts.map(Y);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const span = Math.max(x1 - x0, y1 - y0, 0.004); // at least ~400 m across
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, W = 320, H = 200, k = Math.min(W - 40, H - 40) / span;
+  const px = p => (W / 2 + (X(p) - cx) * k).toFixed(1), py = p => (H / 2 + (Y(p) - cy) * k).toFixed(1);
+  const km = span * 111.32;
+  const line = trail.length > 1 ? `<polyline points="${trail.map(p => px(p) + ',' + py(p)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" opacity=".45"/>` : '';
+  const dots = trail.map(p => `<circle cx="${px(p)}" cy="${py(p)}" r="2.2" fill="var(--accent)" opacity=".5"/>`).join('');
+  const marks = spots.map((t, i) => `<g><circle cx="${px(t.loc)}" cy="${py(t.loc)}" r="10" fill="var(--card)" stroke="var(--owe)" stroke-width="2"/>
+    <text x="${px(t.loc)}" y="${py(t.loc)}" dy="4" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">${i + 1}</text></g>`).join('');
+  const link = spots.length > 1 ? `https://www.google.com/maps/dir/${spots.slice(0, 10).map(t => `${t.loc.lat},${t.loc.lon}`).join('/')}`
+    : spots.length ? `https://www.google.com/maps?q=${spots[0].loc.lat},${spots[0].loc.lon}` : `https://www.google.com/maps?q=${trail[trail.length - 1].lat},${trail[trail.length - 1].lon}`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Route for the day">
+      <rect width="${W}" height="${H}" rx="10" fill="var(--paper)"/>${line}${dots}${marks}
+      <text x="${W - 10}" y="${H - 10}" text-anchor="end" font-size="10" fill="var(--muted)">≈ ${km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km'} across</text></svg>
+    ${spots.length ? `<ol class="spots">${spots.map(t => `<li>${cat(t.cat)[1]} ${esc(t.desc)}${t.time ? ` <small>${esc(t.time)}</small>` : ''}</li>`).join('')}</ol>` : ''}
+    <div class="pad" style="padding-top:4px"><a href="${link}" target="_blank" rel="noopener">Open in Google Maps ↗</a> <small class="zero">(needs internet)</small></div>`;
 }
 
 function balancesTab(g) {
@@ -430,6 +532,11 @@ function peopleTab(g) {
     <div class="section-h"><h2>Travellers</h2></div>
     <div class="card">${rows}
       <div class="member-row" style="border-top:1px solid var(--line)"><input class="in" id="newMember" placeholder="Add a traveller"><button class="btn small" id="addMember">Add</button></div></div>
+    <div class="section-h"><h2>Receipt languages</h2></div>
+    <div class="card pad stack">
+      <div class="chips">${Object.entries(OCR_LANGS).map(([k, l]) => `<button type="button" class="chip" data-lang="${k}" aria-pressed="${(g.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([tzCurrency(), g.base, ...Object.keys(g.rates)].filter(Boolean))).includes(k)}">${l}</button>`).join('')}</div>
+      <span class="note" style="margin:0">${g.ocrLangs?.length ? 'Chosen by you. ' : 'Picked automatically from the currencies on this trip and where your phone is. '}Pick up to 3 — more languages make reading slower. Each downloads once.</span>
+    </div>
     <div class="section-h"><h2>Export</h2></div>
     <div class="card pad btn-row"><button class="btn small" id="csv">Download CSV</button><button class="btn small" id="share">Share summary</button></div>
     <div class="section-h"><h2>Danger zone</h2></div>
@@ -438,6 +545,11 @@ function peopleTab(g) {
 
 function bindGroup(g, tab) {
   $$('[data-tx]').forEach(el => el.onclick = () => txSheet(g, g.tx.find(t => t.id === el.dataset.tx)));
+  $$('[data-route]').forEach(b => b.onclick = () => {
+    const box = $(`[data-dm="${b.dataset.route}"]`);
+    box.hidden = !box.hidden;
+    if (!box.hidden) box.innerHTML = dayMap(g, b.dataset.route);
+  });
   if (tab === 'balances') {
     const plan = settlePlan(balances(g), g.base);
     $$('[data-settle]').forEach(el => el.onclick = () => {
@@ -487,6 +599,14 @@ function bindGroup(g, tab) {
     const addM = () => { const v = $('#newMember').value.trim(); if (!v) return; g.members.push({ id: uid(), name: v }); save(); route(); };
     $('#addMember').onclick = addM;
     $('#newMember').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addM(); } };
+    $$('[data-lang]').forEach(b => b.onclick = () => {
+      const cur = g.ocrLangs?.length ? [...g.ocrLangs] : ocrLangsFor([tzCurrency(), g.base, ...Object.keys(g.rates)].filter(Boolean));
+      const k = b.dataset.lang, on = cur.includes(k);
+      const next = on ? cur.filter(x => x !== k) : [...cur, k];
+      if (!next.length) return toast('Keep at least one language');
+      if (next.length > 3) return toast('Up to 3 languages at a time');
+      g.ocrLangs = next; save(); route();
+    });
     $('#csv').onclick = () => exportCSV(g);
     $('#share').onclick = () => shareSummary(g);
     $('#delGroup').onclick = () => {
@@ -502,7 +622,7 @@ function txSheet(g, existing, preset = {}) {
   if (g.members.length < 2) { toast('Add at least two travellers first'); location.hash = `#/g/${g.id}/people`; return; }
   const everyone = () => Object.fromEntries(g.members.map(m => [m.id, true]));
   const t = existing ? structuredClone(existing) : {
-    type: 'expense', desc: '', amount: '', currency: g.lastCur || g.base, rate: '', date: today(), cat: 'food',
+    type: 'expense', desc: '', amount: '', currency: localCurrency(g), rate: '', date: today(), cat: 'food',
     paidBy: g.me || g.members[0].id, split: { mode: 'equal', parts: everyone() },
     from: g.me || g.members[0].id, to: g.members.find(m => m.id !== (g.me || g.members[0].id))?.id, ...preset
   };
@@ -520,6 +640,10 @@ function txSheet(g, existing, preset = {}) {
 
   const MODES = [['equal', 'equally'], ['items', 'by item (itemised receipt)'], ['exact', 'by exact amounts'], ['percent', 'by percentage'], ['shares', 'by shares']];
   const body = `
+    <div class="drop" id="drop">
+      <div class="thumbs" id="thumbs"></div>
+      <label class="drop-cta"><input type="file" accept="image/*" multiple id="rcptIn" hidden>📷 <b>${t.type === 'payment' ? 'Add a photo' : 'Scan a receipt'}</b><span class="drop-hint">${t.type === 'payment' ? 'or drag &amp; drop / paste' : 'fills in the details for you · or drag &amp; drop / paste'}</span></label>
+      <div class="scan" id="scan" hidden></div></div>
     <div class="amount-hero">${curInput('currency', t.currency)}<input class="in num" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off" aria-label="Amount"></div>
     <div class="rate-box" id="rateBox">
       <div class="rate-line"><span id="rateL"></span><input class="in num" name="rate" inputmode="decimal" autocomplete="off" aria-label="Exchange rate"><span id="rateR"></span>
@@ -539,9 +663,7 @@ function txSheet(g, existing, preset = {}) {
       <div id="splitArea"></div>
       <div class="remain" id="remain"></div></div>
     <div data-show="payment"><input class="in" name="note" value="${esc(t.type === 'payment' ? t.desc : '')}" placeholder="Note (optional) — PayNow, cash…" aria-label="Note"></div>
-    <div class="drop" id="drop">
-      <div class="thumbs" id="thumbs"></div>
-      <label class="drop-cta"><input type="file" accept="image/*" multiple id="rcptIn" hidden>📷 <b>Add receipt photo</b><span class="drop-hint">or drag &amp; drop / paste images</span></label></div>`;
+    <div class="loc" id="locLine" hidden></div>`;
 
   openSheet(existing ? (t.type === 'payment' ? 'Edit payment' : 'Edit expense') : (t.type === 'payment' ? 'Record payment' : 'Add expense'), body, {
     extra: existing ? '<button type="button" class="btn danger" id="delTx">Delete</button>' : '',
@@ -551,7 +673,27 @@ function txSheet(g, existing, preset = {}) {
       g.members.forEach(m => { if (!(m.id in t.split.parts)) t.split.parts[m.id] = t.split.mode === 'equal' ? false : ''; });
 
       const setType = ty => { t.type = ty; $$('[data-show]', form).forEach(el => el.hidden = el.dataset.show !== ty); };
-      $$('[data-cat]', form).forEach(b => b.onclick = () => { t.cat = b.dataset.cat; $$('[data-cat]', form).forEach(x => x.setAttribute('aria-pressed', x === b)); });
+      // fields the user has typed in are never overwritten by what's read from a receipt
+      const touched = new Set(existing ? ['amount', 'desc', 'date', 'currency', 'cat'] : []);
+      ['amount', 'desc', 'date', 'currency'].forEach(n => F[n].addEventListener('input', () => { touched.add(n); F[n].classList.remove('auto', 'need'); }));
+      const setCat = k => { t.cat = k; $$('[data-cat]', form).forEach(x => x.setAttribute('aria-pressed', x.dataset.cat === k)); };
+      $$('[data-cat]', form).forEach(b => b.onclick = () => { touched.add('cat'); setCat(b.dataset.cat); });
+      let closed = false;
+      sheet.addEventListener('close', () => { closed = true; }, { once: true });
+
+      /* location */
+      const drawLoc = () => {
+        const el = $('#locLine'), L = t.loc;
+        el.hidden = !L;
+        if (!L) return;
+        const src = { photo: 'from the receipt photo', trail: 'from your location trail', here: 'where you are now' }[L.src] || '';
+        el.innerHTML = `📍 <span>${L.lat.toFixed(4)}, ${L.lon.toFixed(4)} <small>${src}</small></span>
+          <a href="https://www.google.com/maps?q=${L.lat},${L.lon}" target="_blank" rel="noopener">Map</a><button type="button" class="link" id="locX">Remove</button>`;
+        $('#locX').onclick = () => { t.loc = null; t.locLocked = true; drawLoc(); };
+      };
+      const RANK = { here: 1, trail: 2, photo: 3 };
+      const setLoc = L => { if (t.locLocked || !L) return; if (t.loc && (RANK[t.loc.src] || 0) > (RANK[L.src] || 0)) return; t.loc = { lat: L.lat, lon: L.lon, src: L.src }; drawLoc(); };
+      if (!existing && trailOn()) recordPoint().then(p => { if (p && !closed && Date.now() - p.t < 15 * 60e3) setLoc({ ...p, src: 'here' }); });
 
       /* currency + rate */
       const cur = () => F.currency.value.trim().toUpperCase();
@@ -715,7 +857,67 @@ function txSheet(g, existing, preset = {}) {
         if (!imgs.length) return toast('Only image files can be added as receipts');
         for (const f of imgs) newReceipts.push({ id: uid(), blob: await shrink(f) });
         drawThumbs();
+        if (t.type !== 'payment') readReceipt(imgs[0]); // read the original (full resolution, with its metadata)
       };
+
+      /* read the receipt: fill what we can, highlight what's still needed */
+      let reading = 0;
+      async function readReceipt(file) {
+        const job = ++reading, scan = $('#scan');
+        const say = (html, cls = '') => { if (job !== reading || closed) return; scan.hidden = false; scan.className = 'scan ' + cls; scan.innerHTML = html; };
+        say('<span class="spin"></span> Reading receipt…', 'busy');
+        const ex = await readExif(file);
+        if (ex?.gps) setLoc({ ...ex.gps, src: 'photo' });
+        let r = null, err = null;
+        try {
+          const langs = g.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([C(), tzCurrency(), g.base, ...Object.keys(g.rates)].filter(Boolean));
+          const text = await ocrImage(file, langs, m => {
+            if (m.status === 'recognizing text') say(`<span class="spin"></span> Reading receipt… ${Math.round(m.progress * 100)}%`, 'busy');
+            else if (/load|initiali/i.test(m.status)) say('<span class="spin"></span> Getting the receipt reader ready (first time only)…', 'busy');
+          });
+          r = parseReceipt(text, { hintCurrency: tzCurrency() || g.lastCur || g.base });
+          markOcrReady();
+        } catch (e) { err = e; }
+        if (job !== reading || closed) return;
+
+        const got = [], fill = (name, val) => {
+          if (touched.has(name) || val == null || val === '') return false;
+          F[name].value = val; F[name].classList.add('auto'); F[name].classList.remove('need', 'invalid'); return true;
+        };
+        if (r?.currency && validCur(r.currency) && !touched.has('currency') && !touched.has('amount') && r.currency !== cur()) { F.currency.value = r.currency; F.currency.oninput(); F.currency.classList.add('auto'); }
+        if (r?.total && fill('amount', roundC(r.total, C()))) { got.push(`total ${fmt(r.total, C())}${r.guessed ? ' (best guess)' : ''}`); rateHint(); refresh(); }
+        if (r?.merchant && fill('desc', r.merchant)) got.push(`“${esc(r.merchant)}”`);
+        const d = r?.date || ex?.date;
+        if (d && fill('date', d)) got.push(r?.date ? 'date' : 'date (from photo)');
+        if (r?.cat && !touched.has('cat')) { setCat(r.cat); got.push(cat(r.cat)[2].toLowerCase()); }
+        if (r?.time) t.time = r.time; else if (ex?.time) t.time = ex.time;
+        // where were you at the time on the receipt? (location trail, if switched on)
+        if (!t.loc || t.loc.src === 'here') {
+          const when = new Date(`${F.date.value || today()}T${t.time || '12:00'}`).getTime();
+          const p = nearestTrail(when, t.time ? 2 * 3600e3 : 12 * 3600e3);
+          if (p) setLoc({ ...p, src: 'trail' });
+        }
+        if (t.loc) got.push('location');
+
+        const need = [];
+        if (!(parseNum(F.amount.value) > 0)) { need.push('the total'); F.amount.classList.add('need'); }
+        if (validCur(cur()) && cur() !== g.base && !(+t.rate > 0)) { need.push('the exchange rate'); F.rate.classList.add('need'); }
+        const items = r?.items || [];
+        let html = err ? `<b>Couldn’t read this receipt.</b> ${esc(err.message || '')}` :
+          got.length ? `<b>✓ Filled in from the receipt:</b> ${got.join(', ')}. Please check.` : '<b>Couldn’t make out the details on this receipt.</b>';
+        if (need.length) html += `<br><span class="neg">Please add ${need.join(' and ')}.</span>`;
+        if (items.length >= 2 && t.split.mode !== 'items') html += `<br><button type="button" class="link" id="useReceiptItems">Split by the ${items.length} items on it →</button>`;
+        else if (items.length >= 2) applyItems(items);
+        say(html, err || need.length ? 'warn' : 'ok');
+        $('#useReceiptItems') && ($('#useReceiptItems').onclick = () => { applyItems(items); $('#useReceiptItems').remove(); });
+        if (need.length) (need[0] === 'the total' ? F.amount : F.rate).focus();
+      }
+      function applyItems(items) {
+        const who = inIds().length ? inIds() : g.members.map(m => m.id);
+        t.split.mode = 'items'; F.mode.value = 'items';
+        t.split.items = items.map(it => ({ id: uid(), name: it.name, amount: String(it.amount), who: [...who] }));
+        drawSplit();
+      }
       $('#rcptIn').onchange = e => { const f = [...e.target.files]; e.target.value = ''; addFiles(f); };
       activeDrop = addFiles; // drops anywhere on the sheet land here (see page-level handlers)
       form.onpaste = e => { const f = [...(e.clipboardData?.files || [])]; if (f.length) { e.preventDefault(); addFiles(f); } };
@@ -752,6 +954,8 @@ function txSheet(g, existing, preset = {}) {
             split = { mode, parts };
           }
           Object.assign(out, { desc: F.desc.value.trim() || cat(t.cat)[2], cat: t.cat, paidBy: F.paidBy.value, split });
+          if (t.loc) out.loc = { lat: +t.loc.lat.toFixed(6), lon: +t.loc.lon.toFixed(6), src: t.loc.src };
+          if (t.time) out.time = t.time;
         }
         const dropped = (existing?.receipts || []).filter(id => !out.receipts.includes(id));
         Promise.all(newReceipts.map(n => putReceipt(n.id, n.blob))).then(() => delReceipts(dropped))
@@ -768,7 +972,7 @@ function txSheet(g, existing, preset = {}) {
         g.tx = g.tx.filter(x => x.id !== existing.id); save(); sheet.close(); toast('Deleted'); route();
       };
 
-      setType(t.type); showRate(); drawSplit(); drawThumbs();
+      setType(t.type); showRate(); drawSplit(); drawThumbs(); drawLoc();
       if (!existing) (t.type === 'payment' ? F.amount : F.desc).focus();
     }
   });
@@ -842,4 +1046,5 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 updateNet();
+startTrail();
 route();
