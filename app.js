@@ -358,11 +358,14 @@ function curLabel(g, c) {
   const cc = (g.dest || []).find(x => country(x)?.cur === c);
   return `${cc ? flag(cc) : c === g.base ? '🏠' : '💱'} ${c}`;
 }
-// expense currency: the trip's destination currencies + home, then anything already used; "Other…" for the rest
+// expense currency: this trip's currencies first (destinations + home + any used), then every other currency
 function curSelect(g, value) {
-  const list = [...destCurs(g).filter(c => c !== g.base), g.base, ...tripCurs(g)];
-  if (value && validCur(value)) list.push(value);
-  return `<select class="in cur" name="currency" aria-label="Currency">${[...new Set(list)].map(c => `<option value="${c}" ${c === value ? 'selected' : ''}>${curLabel(g, c)}</option>`).join('')}<option value="__other">Other…</option></select>`;
+  const trip = [...new Set([...destCurs(g).filter(c => c !== g.base), g.base, ...tripCurs(g), ...(value && validCur(value) ? [value] : [])])];
+  const rest = ALL_CURS.filter(c => !trip.includes(c));
+  const name = c => { const k = COUNTRIES.filter(x => x.cur === c); return k.length === 1 ? ` — ${k[0].name}` : c === 'EUR' ? ' — Euro' : ''; };
+  return `<select class="in cur" name="currency" aria-label="Currency">
+    <optgroup label="This trip">${trip.map(c => `<option value="${c}" ${c === value ? 'selected' : ''}>${curLabel(g, c)}</option>`).join('')}</optgroup>
+    <optgroup label="Other currencies">${rest.map(c => `<option value="${c}">${c}${name(c)}</option>`).join('')}<option value="__other">Type a code…</option></optgroup></select>`;
 }
 function homeSelect(name, value, extra = '') {
   return `<select class="in" name="${name}" ${extra}>${ALL_CURS.map(c => { const k = COUNTRIES.filter(x => x.cur === c); return `<option value="${c}" ${c === value ? 'selected' : ''}>${c}${k.length === 1 ? ` — ${k[0].name}` : c === 'EUR' ? ' — Euro' : ''}</option>`; }).join('')}</select>`;
@@ -771,7 +774,7 @@ function txSheet(g, existing, preset = {}) {
       };
       let prevCur = t.currency;
       const setCurrency = c => { // make sure the dropdown has it, then select it
-        if (![...F.currency.options].some(o => o.value === c)) F.currency.lastElementChild.before(new Option(curLabel(g, c), c));
+        if (![...F.currency.options].some(o => o.value === c)) F.currency.querySelector('optgroup').append(new Option(curLabel(g, c), c));
         F.currency.value = c;
       };
       F.currency.oninput = () => {
@@ -1108,7 +1111,12 @@ async function shareSummary(g) {
 
 /* ---------- boot ---------- */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(r => r.update()).catch(() => {});
+  // a newer version just took over: reload once so it's what you see
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !sheet.open && !window.__reloading) { window.__reloading = true; location.reload(); }
+  });
 }
 updateNet();
 startTrail();
