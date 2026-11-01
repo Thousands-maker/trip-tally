@@ -1,7 +1,7 @@
 {
-  "name": "Tally — split bills offline",
-  "short_name": "Tally",
-  "description": "Split shared expenses with friends. Works offline, multi-currency, data stays on your phone.",
+  "name": "Trip Tally — split travel costs offline",
+  "short_name": "Trip Tally",
+  "description": "Share holiday expenses with your travel group. Works offline, multi-currency, receipt photos, data stays on your phone.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

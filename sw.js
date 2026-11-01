@@ -1,5 +1,5 @@
 /* Offline support: cache the app shell, serve it when there's no connection. */
-const CACHE = 'tally-v1';
+const CACHE = 'trip-tally-v2';
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

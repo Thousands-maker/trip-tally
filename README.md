@@ -1,20 +1,24 @@
-# Tally — split bills offline
+# Trip Tally — split travel costs offline
 
-A Splitwise-style bill splitter that runs entirely on your phone. No account, no server, no internet needed after the first load.
+A holiday-expense splitter for a travel group. Log every receipt as you go, in whatever currency you paid, and Trip Tally works out who owes whom. It runs entirely on your phone: no account, no server, no signal needed.
 
 ## What it does
 
-- **Groups** for trips, flats or dinners, with as many people as you like
-- **Expenses** paid by anyone, split four ways: equally, by exact amounts, by percentage, or by shares
-- **Multi-currency** — every group has a main currency; log each expense in whatever currency you paid in and enter the exchange rate you actually got. Rates can be typed either way round (`1 JPY = 0.0087 SGD` or `1 SGD = 115 JPY`)
-- **Rates are snapshotted** on each expense, so later rate changes don't silently rewrite history (there's a "use for all" button if you do want to re-value)
-- **Balances and settle-up** — shows who owes whom and the fewest payments to clear everything; one tap records a payment
-- **Quick maths** in the amount field: type `45.50+12+8.2`
-- **Export** a group to CSV, share a plain-text summary, and back up / restore everything as a JSON file
+- **Trips** with your travel buddies (add or remove people any time)
+- **Not everything is split by the whole group.** Every expense asks *who's in on this?*:
+  - **Equally** among just the people you tick (with Everyone / Clear shortcuts)
+  - **By item**: enter a receipt's line items and tap who had each one. Tax, service charge and tips (or discounts) are spread in proportion to what each person ordered
+  - **Amounts**, **%** or **Shares** for anything else
+- **Receipt photos**: snap or pick one or more photos per expense. They're downscaled and stored on the phone, and tap to view full screen
+- **Multi-currency**: each trip has a home currency. Log each expense in the currency you paid and enter the rate you actually got, typed either way round (`1 JPY = 0.0087 SGD` or `1 SGD = 115 JPY`). Each expense keeps its own rate, and the Rates tab can re-value all items in a currency
+- **Categories** (food, stay, transport, activities, shopping, other) and a trip summary showing spend by category, who paid what and each person's share of costs
+- **Settle up** with the fewest payments; one tap records a payment
+- **Quick maths** in amount fields: `45.50+12+8.2`
+- **Export** a trip to CSV, share a text summary, and back up / restore everything (including receipt photos) as one JSON file
 
 ## Where the data lives
 
-All transactions are stored in the browser's `localStorage` on the device. Nothing is sent anywhere. The app asks the browser for persistent storage so it won't be auto-cleared, but clearing site data or uninstalling the browser will erase it — use **Back up to file** now and then.
+Trips and transactions are in the browser's `localStorage`; receipt photos are in IndexedDB. Nothing leaves the device. The app asks the browser for persistent storage, but clearing site data erases everything, so use **Back up to file** after a trip.
 
 ## Offline
 
@@ -25,25 +29,13 @@ A service worker caches the app on first visit. After that it opens and works wi
 
 ## Run locally
 
-It's plain HTML/CSS/JS with no build step:
+Plain HTML/CSS/JS, no build step:
 
 ```sh
 python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
-(Service workers need `http://localhost` or `https://`, not `file://`.)
-
 ## Hosting
 
-Turn on GitHub Pages for this repo (Settings → Pages → Deploy from branch → `main` / root) and open the Pages URL on your phone once while online.
-
-## Files
-
-| File | Purpose |
-| --- | --- |
-| `index.html` | App shell |
-| `app.js` | All logic: storage, split maths, balances, UI |
-| `styles.css` | Styles (light and dark) |
-| `sw.js` | Offline cache |
-| `manifest.webmanifest`, `icon*` | Install-to-home-screen metadata |
+GitHub Pages: Settings → Pages → Deploy from branch → `main` / root. Open the Pages URL on your phone once while online, then install it.
