@@ -176,6 +176,7 @@ function updateNet() { const n = $('#netBadge'); const on = navigator.onLine; n.
 addEventListener('online', updateNet); addEventListener('offline', updateNet);
 
 function openSheet(title, body, { submit = 'Save', onSubmit, extra = '', onMount } = {}) {
+  sheetForm.onpaste = null;
   sheetForm.innerHTML = `
     <div class="sheet-head"><h2 id="sheetTitle">${esc(title)}</h2>
       <button type="button" class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div>
@@ -188,10 +189,32 @@ function openSheet(title, body, { submit = 'Save', onSubmit, extra = '', onMount
 }
 sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); });
 
+/* ---------- drag & drop receipts ---------- */
+let activeDrop = null, currentGroup = null;
+const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+document.addEventListener('dragover', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); // never let the browser navigate away to the image
+  if (sheet.open && activeDrop) $('#drop')?.classList.add('over');
+  else if (!sheet.open && currentGroup) document.body.classList.add('dropping');
+});
+document.addEventListener('dragleave', e => {
+  if (e.relatedTarget) return;
+  document.body.classList.remove('dropping'); $('#drop')?.classList.remove('over');
+});
+document.addEventListener('drop', e => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  document.body.classList.remove('dropping'); $('#drop')?.classList.remove('over');
+  const files = [...e.dataTransfer.files];
+  if (sheet.open) { if (activeDrop) activeDrop(files); }
+  else if (currentGroup) txSheet(currentGroup, null, { _files: files });
+});
+
 /* ---------- router ---------- */
 function route() {
   const h = location.hash.replace(/^#\/?/, '').split('/');
-  fab.hidden = true;
+  fab.hidden = true; currentGroup = null;
   if (h[0] === 'g' && group(h[1])) return renderGroup(group(h[1]), h[2] || 'activity');
   if (h[0] === 'g') location.hash = '#/';
   renderHome();
@@ -273,6 +296,7 @@ function newGroupSheet() {
 
 /* ---------- group ---------- */
 function renderGroup(g, tab) {
+  currentGroup = g;
   setBar(g.name, '#/');
   const tabs = [['activity', 'Activity'], ['balances', 'Balances'], ['rates', 'Rates'], ['people', 'Trip']];
   const nav = `<nav class="tabs">${tabs.map(([k, l]) => `<a href="#/g/${g.id}/${k}" ${k === tab ? 'aria-current="page"' : ''}>${l}</a>`).join('')}</nav>`;
@@ -494,35 +518,30 @@ function txSheet(g, existing, preset = {}) {
   let rateDir = t.rate && t.rate < 1 ? 'inv' : 'fwd'; // fwd: 1 CUR = x BASE ; inv: 1 BASE = x CUR
   const memberOpts = sel => g.members.map(m => `<option value="${m.id}" ${m.id === sel ? 'selected' : ''}>${esc(m.name)}${m.id === g.me ? ' (you)' : ''}</option>`).join('');
 
+  const MODES = [['equal', 'equally'], ['items', 'by item (itemised receipt)'], ['exact', 'by exact amounts'], ['percent', 'by percentage'], ['shares', 'by shares']];
   const body = `
-    <div class="seg" role="group" aria-label="Type">
-      <button type="button" data-type="expense" aria-pressed="${t.type !== 'payment'}">Expense</button>
-      <button type="button" data-type="payment" aria-pressed="${t.type === 'payment'}">Payment</button></div>
+    <div class="amount-hero">${curInput('currency', t.currency)}<input class="in num" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off" aria-label="Amount"></div>
+    <div class="rate-box" id="rateBox">
+      <div class="rate-line"><span id="rateL"></span><input class="in num" name="rate" inputmode="decimal" autocomplete="off" aria-label="Exchange rate"><span id="rateR"></span>
+        <button type="button" class="swap" id="swapDir" aria-label="Flip rate direction">⇄</button></div>
+      <div class="rate-hint" id="rateHint"></div></div>
     <div data-show="expense" class="stack">
-      <div class="cats" role="group" aria-label="Category">${CATS.map(([k, e, l]) => `<button type="button" data-cat="${k}" aria-pressed="${t.cat === k}"><span>${e}</span>${l}</button>`).join('')}</div>
-      <label class="f">What was it?<input class="in" name="desc" value="${esc(t.type !== 'payment' ? t.desc : '')}" placeholder="Ramen in Shinjuku, airport taxi…" autocomplete="off"></label></div>
+      <input class="in" name="desc" value="${esc(t.type !== 'payment' ? t.desc : '')}" placeholder="What was it? e.g. Ramen, airport taxi" autocomplete="off" aria-label="Description">
+      <div class="cats" role="group" aria-label="Category">${CATS.map(([k, e, l]) => `<button type="button" data-cat="${k}" aria-pressed="${t.cat === k}" title="${l}" aria-label="${l}">${e}</button>`).join('')}</div></div>
     <div data-show="payment" class="pair">
       <label class="f grow">From<select class="in" name="from">${memberOpts(t.from)}</select></label>
       <label class="f grow">To<select class="in" name="to">${memberOpts(t.to)}</select></label></div>
-    <label class="f"><span data-show="expense">Receipt total</span><span data-show="payment">Amount</span><div class="pair">${curInput('currency', t.currency)}<input class="in num grow" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off"></div></label>
-    <div class="rate-box" id="rateBox">
-      <div class="rate-line"><span id="rateL"></span><input class="in num" name="rate" inputmode="decimal" autocomplete="off"><span id="rateR"></span>
-        <button type="button" class="swap" id="swapDir" aria-label="Flip rate direction">⇄</button></div>
-      <div class="rate-hint" id="rateHint"></div></div>
-    <div class="pair">
-      <label class="f grow" data-show="expense">Paid by<select class="in" name="paidBy">${memberOpts(t.paidBy)}</select></label>
-      <label class="f grow">Date<input class="in" type="date" name="date" value="${esc(t.date)}"></label></div>
-    <div data-show="payment"><label class="f">Note (optional)<input class="in" name="note" value="${esc(t.type === 'payment' ? t.desc : '')}" placeholder="Bank transfer, PayNow…"></label></div>
+    <div class="sentence">
+      <select class="in mini grow" name="paidBy" data-show="expense" aria-label="Paid by">${g.members.map(m => `<option value="${m.id}" ${m.id === t.paidBy ? 'selected' : ''}>Paid by ${m.id === g.me ? 'you' : esc(m.name)}</option>`).join('')}</select>
+      <input class="in mini" type="date" name="date" value="${esc(t.date)}" aria-label="Date"></div>
     <div data-show="expense" class="stack">
-      <div class="f-label">Who’s in on this?</div>
-      <div class="seg" role="group" aria-label="Split method">
-        ${[['equal', 'Equally'], ['items', 'By item'], ['exact', 'Amounts'], ['percent', '%'], ['shares', 'Shares']].map(([k, l]) => `<button type="button" data-mode="${k}" aria-pressed="${t.split.mode === k}">${l}</button>`).join('')}</div>
+      <div class="sentence"><span>Split</span><select class="in mini" name="mode" aria-label="How to split">${MODES.map(([k, l]) => `<option value="${k}" ${t.split.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div id="splitArea"></div>
       <div class="remain" id="remain"></div></div>
-    <div class="stack">
-      <div class="f-label">Receipt photos</div>
+    <div data-show="payment"><input class="in" name="note" value="${esc(t.type === 'payment' ? t.desc : '')}" placeholder="Note (optional) — PayNow, cash…" aria-label="Note"></div>
+    <div class="drop" id="drop">
       <div class="thumbs" id="thumbs"></div>
-      <label class="btn small" style="justify-self:start">📷 Add receipt<input type="file" accept="image/*" multiple id="rcptIn" hidden></label></div>`;
+      <label class="drop-cta"><input type="file" accept="image/*" multiple id="rcptIn" hidden>📷 <b>Add receipt photo</b><span class="drop-hint">or drag &amp; drop / paste images</span></label></div>`;
 
   openSheet(existing ? (t.type === 'payment' ? 'Edit payment' : 'Edit expense') : (t.type === 'payment' ? 'Record payment' : 'Add expense'), body, {
     extra: existing ? '<button type="button" class="btn danger" id="delTx">Delete</button>' : '',
@@ -531,13 +550,7 @@ function txSheet(g, existing, preset = {}) {
       const F = form.elements;
       g.members.forEach(m => { if (!(m.id in t.split.parts)) t.split.parts[m.id] = t.split.mode === 'equal' ? false : ''; });
 
-      const setType = ty => {
-        t.type = ty;
-        $$('[data-type]', form).forEach(b => b.setAttribute('aria-pressed', b.dataset.type === ty));
-        $$('[data-show]', form).forEach(el => el.hidden = el.dataset.show !== ty);
-        $('#sheetTitle').textContent = (existing ? 'Edit ' : ty === 'payment' ? 'Record ' : 'Add ') + ty;
-      };
-      $$('[data-type]', form).forEach(b => b.onclick = () => setType(b.dataset.type));
+      const setType = ty => { t.type = ty; $$('[data-show]', form).forEach(el => el.hidden = el.dataset.show !== ty); };
       $$('[data-cat]', form).forEach(b => b.onclick = () => { t.cat = b.dataset.cat; $$('[data-cat]', form).forEach(x => x.setAttribute('aria-pressed', x === b)); });
 
       /* currency + rate */
@@ -580,8 +593,8 @@ function txSheet(g, existing, preset = {}) {
         : g.members.filter(m => t.split.mode === 'equal' ? t.split.parts[m.id] : parseNum(t.split.parts[m.id]) > 0).map(m => m.id);
       const newItem = who => ({ id: uid(), name: '', amount: '', who });
 
-      $$('[data-mode]', form).forEach(b => b.onclick = () => {
-        const mode = b.dataset.mode; if (mode === t.split.mode) return;
+      F.mode.onchange = () => {
+        const mode = F.mode.value; if (mode === t.split.mode) return;
         const on = inIds(), ids = on.length ? on : g.members.map(m => m.id);
         t.split.mode = mode;
         if (mode === 'items') { if (!t.split.items.length) t.split.items = [newItem(ids)]; }
@@ -589,9 +602,8 @@ function txSheet(g, existing, preset = {}) {
           t.split.parts = Object.fromEntries(g.members.map(m => [m.id, mode === 'equal' ? ids.includes(m.id) : mode === 'shares' ? (ids.includes(m.id) ? 1 : '') : '']));
           if (mode === 'percent' && ids.length) Object.assign(t.split.parts, allocate(100, ids.map(i => [i, 1]), 'USD'));
         }
-        $$('[data-mode]', form).forEach(x => x.setAttribute('aria-pressed', x.dataset.mode === mode));
         drawSplit();
-      });
+      };
 
       const draftSplit = () => t.split.mode === 'items'
         ? { mode: 'items', items: t.split.items.map(it => ({ ...it, amount: parseNum(it.amount) || 0 })) }
@@ -627,8 +639,15 @@ function txSheet(g, existing, preset = {}) {
           };
           $('#useItems').onclick = () => { F.amount.value = roundC(itemsSum(), c); rateHint(); refresh(); };
         } else {
-          area.innerHTML = `${mode === 'equal' ? `<div class="btn-row"><button type="button" class="btn small" id="selAll">Everyone</button><button type="button" class="btn small" id="selNone">Clear</button></div>` : ''}
-            <div class="split-list">${g.members.map(m => {
+          if (mode === 'equal') {
+            area.innerHTML = `<div class="chips">${g.members.map(m => `<button type="button" class="chip" data-eq="${m.id}" aria-pressed="${!!t.split.parts[m.id]}">${esc(m.name)}</button>`).join('')}</div>
+              <div class="links"><button type="button" class="link" id="selAll">Everyone</button><button type="button" class="link" id="selNone">Nobody</button></div>`;
+            $$('[data-eq]', area).forEach(b => b.onclick = () => { const id = b.dataset.eq; t.split.parts[id] = !t.split.parts[id]; b.setAttribute('aria-pressed', !!t.split.parts[id]); refresh(); });
+            $('#selAll').onclick = () => { g.members.forEach(m => t.split.parts[m.id] = true); drawSplit(); };
+            $('#selNone').onclick = () => { g.members.forEach(m => t.split.parts[m.id] = false); drawSplit(); };
+            return refresh();
+          }
+          area.innerHTML = `<div class="split-list">${g.members.map(m => {
             const v = t.split.parts[m.id];
             const ctl = mode === 'equal'
               ? `<input type="checkbox" data-part="${m.id}" ${v ? 'checked' : ''} aria-label="Include ${esc(m.name)}">`
@@ -639,10 +658,6 @@ function txSheet(g, existing, preset = {}) {
           $$('[data-part]', area).forEach(inp => {
             inp.oninput = inp.onchange = () => { t.split.parts[inp.dataset.part] = inp.type === 'checkbox' ? inp.checked : inp.value; refresh(); };
           });
-          if (mode === 'equal') {
-            $('#selAll').onclick = () => { g.members.forEach(m => t.split.parts[m.id] = true); drawSplit(); };
-            $('#selNone').onclick = () => { g.members.forEach(m => t.split.parts[m.id] = false); drawSplit(); };
-          }
         }
         refresh();
       }
@@ -695,12 +710,17 @@ function txSheet(g, existing, preset = {}) {
           drawThumbs();
         });
       }
-      $('#rcptIn').onchange = async e => {
-        const files = [...e.target.files]; e.target.value = '';
-        for (const f of files) newReceipts.push({ id: uid(), blob: await shrink(f) });
+      const addFiles = async files => {
+        const imgs = [...files].filter(f => f.type.startsWith('image/'));
+        if (!imgs.length) return toast('Only image files can be added as receipts');
+        for (const f of imgs) newReceipts.push({ id: uid(), blob: await shrink(f) });
         drawThumbs();
       };
-      sheet.addEventListener('close', () => urls.forEach(u => URL.revokeObjectURL(u)), { once: true });
+      $('#rcptIn').onchange = e => { const f = [...e.target.files]; e.target.value = ''; addFiles(f); };
+      activeDrop = addFiles; // drops anywhere on the sheet land here (see page-level handlers)
+      form.onpaste = e => { const f = [...(e.clipboardData?.files || [])]; if (f.length) { e.preventDefault(); addFiles(f); } };
+      sheet.addEventListener('close', () => { activeDrop = null; urls.forEach(u => URL.revokeObjectURL(u)); }, { once: true });
+      if (t._files) { addFiles(t._files); delete t._files; }
 
       commit = function () {
         const c = cur(), amount = roundC(parseNum(F.amount.value), C());

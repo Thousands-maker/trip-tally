@@ -208,3 +208,35 @@ textarea.in { resize: vertical; min-height: 80px; }
 .viewer img { max-width: 100%; max-height: calc(100dvh - 60px); object-fit: contain; border-radius: 6px; }
 .viewer span { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); color: #ccc; font-size: 13px; }
 .avatar { font-size: 19px; }
+
+/* Simpler expense form */
+.amount-hero { display: flex; gap: 8px; align-items: stretch; }
+.amount-hero .in.cur { width: 84px; font-size: 18px; text-align: center; }
+.amount-hero .in[name=amount] { flex: 1; min-width: 0; font-size: 28px; font-weight: 600; padding: 8px 14px; letter-spacing: -.01em; }
+.cats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.cats button { justify-content: center; font-size: 22px; padding: 6px 0; line-height: 1.2; filter: grayscale(.7); opacity: .6; }
+.cats button[aria-pressed="true"] { filter: none; opacity: 1; }
+.sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 15px; color: var(--muted); }
+.in.mini { width: auto; padding: 7px 10px; font-size: 15px; font-weight: 600; color: var(--ink); background: var(--card); }
+.links { display: flex; gap: 14px; font-size: 13.5px; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 600; }
+.rate-box { padding: 10px 12px; gap: 4px; }
+.drop { border: 1.5px dashed var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 10px; transition: .15s; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop-cta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; cursor: pointer; font-size: 15px; }
+.drop-cta b { color: var(--accent); }
+.drop-hint { color: var(--muted); font-size: 13px; }
+body.dropping::after {
+  content: "Drop receipt photos to add an expense"; position: fixed; inset: 12px; z-index: 40;
+  display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 20px;
+  background: color-mix(in srgb, var(--accent-soft) 85%, transparent); color: var(--accent);
+  font-weight: 700; font-size: 18px; pointer-events: none;
+}
+.sentence .in.mini[type=date] { width: 136px; font-size: 14.5px; padding: 7px 8px; }
+.sentence select.in.mini[name=paidBy] { max-width: 150px; }
+.links { margin-top: 2px; }
+#splitArea .chips + .links { margin-top: 8px; }
+.remain { text-align: left; }
+.sentence { flex-wrap: nowrap; }
+.sentence .grow { flex: 1; min-width: 0; max-width: none !important; }
+.sentence select[name=mode] { flex: 1; min-width: 0; }

@@ -9,7 +9,7 @@ A holiday-expense splitter for a travel group. Log every receipt as you go, in w
   - **Equally** among just the people you tick (with Everyone / Clear shortcuts)
   - **By item**: enter a receipt's line items and tap who had each one. Tax, service charge and tips (or discounts) are spread in proportion to what each person ordered
   - **Amounts**, **%** or **Shares** for anything else
-- **Receipt photos**: snap or pick one or more photos per expense. They're downscaled and stored on the phone, and tap to view full screen
+- **Receipt photos**: snap, pick, drag & drop or paste one or more photos per expense. Drop a photo anywhere on a trip to start a new expense with it attached. Photos are downscaled, stored on the phone, and open full screen when tapped
 - **Multi-currency**: each trip has a home currency. Log each expense in the currency you paid and enter the rate you actually got, typed either way round (`1 JPY = 0.0087 SGD` or `1 SGD = 115 JPY`). Each expense keeps its own rate, and the Rates tab can re-value all items in a currency
 - **Categories** (food, stay, transport, activities, shopping, other) and a trip summary showing spend by category, who paid what and each person's share of costs
 - **Settle up** with the fewest payments; one tap records a payment
