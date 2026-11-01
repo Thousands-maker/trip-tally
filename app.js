@@ -176,7 +176,7 @@ function updateNet() { const n = $('#netBadge'); const on = navigator.onLine; n.
 addEventListener('online', updateNet); addEventListener('offline', updateNet);
 
 function openSheet(title, body, { submit = 'Save', onSubmit, extra = '', onMount } = {}) {
-  sheetForm.onpaste = null;
+  sheetForm.onpaste = null; sheetForm.onmousedown = null;
   sheetForm.innerHTML = `
     <div class="sheet-head"><h2 id="sheetTitle">${esc(title)}</h2>
       <button type="button" class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div>
@@ -354,18 +354,50 @@ const flag = cc => String.fromCodePoint(...[...cc].map(ch => 0x1F1E6 + ch.charCo
 const ALL_CURS = [...new Set([...COMMON, ...COUNTRIES.map(c => c.cur)])].filter(validCur).sort();
 const destCurs = g => [...new Set((g.dest || []).map(cc => country(cc)?.cur).filter(Boolean))];
 const tripCurs = g => [...new Set([...destCurs(g), g.base, ...Object.keys(g.rates || {}), ...(g.tx || []).map(t => t.currency)])];
-function curLabel(g, c) {
-  const cc = (g.dest || []).find(x => country(x)?.cur === c);
-  return `${cc ? flag(cc) : c === g.base ? '🏠' : '💱'} ${c}`;
+// rough country boxes [south, west, north, east] — offline "which currencies could apply here?"
+const BOXES = {
+  AR: [-55.1, -73.6, -21.8, -53.6], AU: [-43.7, 112.9, -10, 153.7], AT: [46.4, 9.5, 49, 17.2], BE: [49.5, 2.5, 51.5, 6.4], BR: [-33.8, -74, 5.3, -34.8],
+  BN: [4, 114, 5.1, 115.4], KH: [10.4, 102.3, 14.7, 107.6], CA: [41.7, -141, 83.1, -52.6], CL: [-56, -75.7, -17.5, -66.4], CN: [[18.2, 73.5, 53.6, 124.4], [40.2, 124.4, 53.6, 134.8]],
+  CO: [-4.2, -79, 12.5, -66.9], HR: [42.4, 13.5, 46.6, 19.5], CZ: [48.5, 12.1, 51.1, 18.9], DK: [54.6, 8, 57.8, 15.2], EG: [22, 24.7, 31.7, 36.9],
+  FJ: [-19.2, 177, -16, 180], FI: [59.8, 20.6, 70.1, 31.6], FR: [41.3, -5.2, 51.1, 9.6], GE: [41, 40, 43.6, 46.7], DE: [47.3, 5.9, 55.1, 15],
+  GR: [34.8, 19.4, 41.8, 28.3], HK: [22.15, 113.8, 22.56, 114.45], HU: [45.7, 16.1, 48.6, 22.9], IS: [63.3, -24.6, 66.6, -13.5], IN: [6.7, 68.1, 35.7, 97.4],
+  ID: [[-11, 95, 6.1, 119], [-11, 119, 5, 141]], IE: [51.4, -10.5, 55.4, -6], IL: [29.5, 34.2, 33.3, 35.9], IT: [36.6, 6.6, 47.1, 18.5], JP: [[30.9, 129.4, 45.6, 145.8], [24, 122.9, 28.6, 131.4]],
+  JO: [29.2, 34.9, 33.4, 39.3], KZ: [40.6, 46.5, 55.4, 87.3], LA: [13.9, 100.1, 22.5, 107.7], MO: [22.1, 113.5, 22.22, 113.6], MY: [0.85, 99.6, 7.4, 119.3],
+  MV: [-0.7, 72.6, 7.1, 73.8], MX: [14.5, -117.1, 32.7, -86.7], MN: [41.6, 87.7, 52.2, 119.9], MA: [27.6, -13.2, 35.9, -1], MM: [9.8, 92.2, 28.5, 101.2],
+  NP: [26.3, 80.1, 30.4, 88.2], NL: [50.8, 3.3, 53.6, 7.2], NZ: [-47.3, 166.4, -34.4, 178.6], NO: [58, 4.6, 71.2, 31.1], PE: [-18.4, -81.4, 0, -68.7],
+  PH: [4.6, 116.9, 21.1, 126.6], PL: [49, 14.1, 54.9, 24.2], PT: [36.9, -9.5, 42.2, -6.2], QA: [24.5, 50.7, 26.2, 51.7], SA: [16.3, 34.5, 32.2, 55.7],
+  SG: [1.15, 103.6, 1.48, 104.1], ZA: [-34.9, 16.4, -22.1, 32.9], KR: [33.1, 125, 38.7, 131], ES: [36, -9.4, 43.8, 3.4], LK: [5.9, 79.6, 9.9, 81.9],
+  SE: [55.3, 11, 69.1, 24.2], CH: [45.8, 5.9, 47.8, 10.5], TW: [21.9, 119.3, 25.3, 122.1], TH: [5.6, 97.3, 20.5, 105.7], TR: [35.8, 25.6, 42.1, 44.8],
+  AE: [22.6, 51.5, 26.1, 56.4], GB: [49.9, -8.2, 60.9, 1.8], US: [[24.4, -125, 49.4, -66.9], [51, -179, 71.5, -129], [18.8, -160.3, 22.3, -154.7]], UZ: [37.2, 55.9, 45.6, 73.2], VN: [8.4, 102.1, 23.4, 109.5]
+};
+function countriesAt(p) { // every country whose box contains the point, most specific (smallest box) first
+  const hits = [];
+  for (const [cc, v] of Object.entries(BOXES)) {
+    for (const [s, w, n, e] of Array.isArray(v[0]) ? v : [v]) {
+      if (p.lat >= s - 0.05 && p.lat <= n + 0.05 && p.lon >= w - 0.05 && p.lon <= e + 0.05) { hits.push([cc, (n - s) * (e - w)]); break; }
+    }
+  }
+  return hits.sort((a, b) => a[1] - b[1]).map(h => h[0]);
 }
-// expense currency: this trip's currencies first (destinations + home + any used), then every other currency
-function curSelect(g, value) {
-  const trip = [...new Set([...destCurs(g).filter(c => c !== g.base), g.base, ...tripCurs(g), ...(value && validCur(value) ? [value] : [])])];
-  const rest = ALL_CURS.filter(c => !trip.includes(c));
-  const name = c => { const k = COUNTRIES.filter(x => x.cur === c); return k.length === 1 ? ` — ${k[0].name}` : c === 'EUR' ? ' — Euro' : ''; };
-  return `<select class="in cur" name="currency" aria-label="Currency">
-    <optgroup label="This trip">${trip.map(c => `<option value="${c}" ${c === value ? 'selected' : ''}>${curLabel(g, c)}</option>`).join('')}</optgroup>
-    <optgroup label="Other currencies">${rest.map(c => `<option value="${c}">${c}${name(c)}</option>`).join('')}<option value="__other">Type a code…</option></optgroup></select>`;
+const CUR_FLAG = { EUR: '🇪🇺', USD: '🇺🇸' };
+function curFlag(g, c) {
+  const d = (g?.dest || []).find(x => country(x)?.cur === c);
+  if (d) return flag(d);
+  if (CUR_FLAG[c]) return CUR_FLAG[c];
+  const k = COUNTRIES.find(x => x.cur === c);
+  return k ? flag(k.cc) : '💱';
+}
+function curName(c) { const k = COUNTRIES.filter(x => x.cur === c); return c === 'EUR' ? 'Euro' : k.length ? k.map(x => x.name).join(', ') : ''; }
+let lastPos = null;
+async function hereNow(ask = false) { // a recent position, without nagging for permission
+  const tr = S.trail || [], last = tr[tr.length - 1];
+  if (lastPos && Date.now() - lastPos.t < 30 * 60e3) return lastPos;
+  if (last && Date.now() - last.t < 30 * 60e3) return (lastPos = last);
+  let granted = false;
+  try { granted = (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'; } catch (e) { /* unknown */ }
+  if (!granted && !ask) return null;
+  const p = await getPos(10 * 60e3);
+  return p ? (lastPos = p) : null;
 }
 function homeSelect(name, value, extra = '') {
   return `<select class="in" name="${name}" ${extra}>${ALL_CURS.map(c => { const k = COUNTRIES.filter(x => x.cur === c); return `<option value="${c}" ${c === value ? 'selected' : ''}>${c}${k.length === 1 ? ` — ${k[0].name}` : c === 'EUR' ? ' — Euro' : ''}</option>`; }).join('')}</select>`;
@@ -701,7 +733,9 @@ function txSheet(g, existing, preset = {}) {
       <div class="thumbs" id="thumbs"></div>
       <label class="drop-cta"><input type="file" accept="image/*" multiple id="rcptIn" hidden>📷 <b>${t.type === 'payment' ? 'Add a photo' : 'Scan a receipt'}</b><span class="drop-hint">${t.type === 'payment' ? 'or drag &amp; drop / paste' : 'fills in the details for you · or drag &amp; drop / paste'}</span></label>
       <div class="scan" id="scan" hidden></div></div>
-    <div class="amount-hero">${curSelect(g, t.currency)}<input class="in num" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off" aria-label="Amount"></div>
+    <div class="amount-hero"><input type="hidden" name="currency" value="${esc(t.currency)}">
+      <button type="button" class="cur-btn" id="curBtn" aria-haspopup="listbox" aria-label="Currency"></button>
+      <div class="cur-pop" id="curPop" hidden></div><input class="in num" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off" aria-label="Amount"></div>
     <div class="rate-box" id="rateBox">
       <div class="rate-line"><span id="rateL"></span><input class="in num" name="rate" inputmode="decimal" autocomplete="off" aria-label="Exchange rate"><span id="rateR"></span>
         <button type="button" class="swap" id="swapDir" aria-label="Flip rate direction">⇄</button></div>
@@ -772,18 +806,62 @@ function txSheet(g, existing, preset = {}) {
         h.textContent = (rateDir === 'fwd' ? `1 ${g.base} = ${nice(1 / r)} ${c}` : `1 ${c} = ${nice(r)} ${g.base}`) +
           (a > 0 ? ` · ${fmt(a, c)} ≈ ${fmt(a * r, g.base)}` : '');
       };
-      let prevCur = t.currency;
-      const setCurrency = c => { // make sure the dropdown has it, then select it
-        if (![...F.currency.options].some(o => o.value === c)) F.currency.querySelector('optgroup').append(new Option(curLabel(g, c), c));
-        F.currency.value = c;
+      /* currency picker */
+      const curBtn = $('#curBtn'), pop = $('#curPop');
+      const paintCur = () => { curBtn.innerHTML = `<span class="cflag">${curFlag(g, cur())}</span><b>${cur()}</b><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`; };
+      const setCurrency = (c, auto = false) => { F.currency.value = c; paintCur(); curBtn.classList.toggle('auto', auto); };
+      const chip = (c, note = '') => `<button type="button" class="cchip${c === cur() ? ' on' : ''}" data-pick="${c}"><span class="cflag">${curFlag(g, c)}</span>${c}${note ? `<small>${note}</small>` : ''}</button>`;
+      const tripList = () => [...new Set([...destCurs(g).filter(c => c !== g.base), g.base, ...tripCurs(g)])];
+      const listRows = q => {
+        q = q.trim().toLowerCase();
+        const rows = ALL_CURS.filter(c => !q || c.toLowerCase().includes(q) || curName(c).toLowerCase().includes(q));
+        const code = q.toUpperCase();
+        if (q.length === 3 && validCur(code) && !rows.includes(code)) rows.unshift(code);
+        return rows.length ? rows.map(c => `<button type="button" class="crow${c === cur() ? ' on' : ''}" data-pick="${c}"><span class="cflag">${curFlag(g, c)}</span><b>${c}</b><span>${esc(curName(c))}</span></button>`).join('')
+          : '<p class="note">No match — type a 3-letter code, e.g. USD</p>';
       };
-      F.currency.oninput = () => {
-        if (F.currency.value === '__other') {
-          const v = (prompt('Currency code (3 letters, e.g. USD, EUR, JPY):') || '').trim().toUpperCase();
-          if (!validCur(v)) { if (v) toast('That isn’t a currency code'); F.currency.value = prevCur; return; }
-          setCurrency(v);
+      const nearChips = p => {
+        const tz = tzCurrency();
+        const fromPos = p ? countriesAt(p).map(cc => country(cc)?.cur).filter(Boolean) : [];
+        const tzOk = tz && validCur(tz) ? [tz] : [];
+        // the phone's time zone is the best single clue to the country, so its currency goes first
+        const list = [...new Set(fromPos.includes(tz) ? [tz, ...fromPos] : [...fromPos, ...tzOk])].slice(0, 5);
+        return list.length ? list.map(c => chip(c)).join('') : '<span class="note" style="margin:0">Not sure where you are</span>';
+      };
+      async function openPicker() {
+        pop.hidden = false;
+        pop.innerHTML = `<input class="in" id="curSearch" placeholder="Search currency or country" autocomplete="off" aria-label="Search currencies">
+          <div class="csec"><div class="clabel">📍 Near you</div><div class="cchips" id="nearChips">${nearChips(null)}</div></div>
+          <div class="csec"><div class="clabel">This trip</div><div class="cchips">${tripList().map(c => chip(c, c === g.base ? 'home' : '')).join('')}</div></div>
+          <div class="csec"><div class="clabel">All currencies</div><div class="clist" id="curList">${listRows('')}</div></div>`;
+        const search = $('#curSearch', pop);
+        search.oninput = () => { $('#curList', pop).innerHTML = listRows(search.value); };
+        search.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const first = $('#curList [data-pick]', pop); if (first) first.click(); } };
+        if (matchMedia('(pointer: fine)').matches) search.focus();
+        const p = await hereNow(false);
+        if (pop.hidden) return;
+        if (p) $('#nearChips', pop).innerHTML = nearChips(p);
+        else if (navigator.geolocation) {
+          $('#nearChips', pop).insertAdjacentHTML('beforeend', '<button type="button" class="link" id="useLoc">Use my location</button>');
+          $('#useLoc', pop).onclick = async () => {
+            $('#useLoc', pop).textContent = 'Finding you…';
+            const q = await hereNow(true);
+            if (!pop.hidden) $('#nearChips', pop).innerHTML = q ? nearChips(q) : nearChips(null) + '<span class="note" style="margin:0">Location not available</span>';
+          };
         }
-        prevCur = F.currency.value;
+      }
+      const setOpen = open => { curBtn.setAttribute('aria-expanded', open); if (!open) pop.hidden = true; };
+      new MutationObserver(() => curBtn.setAttribute('aria-expanded', !pop.hidden)).observe(pop, { attributes: true, attributeFilter: ['hidden'] });
+      curBtn.onclick = () => (pop.hidden ? openPicker() : setOpen(false));
+      pop.onclick = e => {
+        const b = e.target.closest('[data-pick]');
+        if (!b) return;
+        touched.add('currency'); setCurrency(b.dataset.pick); pop.hidden = true; F.currency.oninput(); curBtn.focus();
+      };
+      form.onmousedown = e => { if (!pop.hidden && !pop.contains(e.target) && !curBtn.contains(e.target)) pop.hidden = true; };
+      pop.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); pop.hidden = true; curBtn.focus(); } };
+      paintCur();
+      F.currency.oninput = () => {
         const c = cur();
         if (validCur(c)) { t.currency = c; t.rate = c === g.base ? '' : (g.rates[c] || ''); rateDir = t.rate ? (t.rate < 1 ? 'inv' : 'fwd') : naturalDir(c); showRate(); drawSplit(); }
       };
@@ -952,7 +1030,7 @@ function txSheet(g, existing, preset = {}) {
           if (touched.has(name) || val == null || val === '') return false;
           F[name].value = val; F[name].classList.add('auto'); F[name].classList.remove('need', 'invalid'); return true;
         };
-        if (r?.currency && validCur(r.currency) && !touched.has('currency') && !touched.has('amount') && r.currency !== cur()) { setCurrency(r.currency); F.currency.oninput(); F.currency.classList.add('auto'); }
+        if (r?.currency && validCur(r.currency) && !touched.has('currency') && !touched.has('amount') && r.currency !== cur()) { setCurrency(r.currency, true); F.currency.oninput(); }
         if (r?.total && fill('amount', roundC(r.total, C()))) { got.push(`total ${fmt(r.total, C())}${r.guessed ? ' (best guess)' : ''}`); rateHint(); refresh(); }
         if (r?.merchant && fill('desc', r.merchant)) got.push(`“${esc(r.merchant)}”`);
         const d = r?.date || ex?.date;

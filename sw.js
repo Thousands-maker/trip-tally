@@ -1,6 +1,6 @@
 /* Offline support. Online: always fetch the latest app (so updates show up straight away).
    Offline: serve the copy saved on the phone. The receipt reader is cached once and kept. */
-const CACHE = 'trip-tally-v7';
+const CACHE = 'trip-tally-v8';
 const OCR_CACHE = 'trip-tally-ocr-v1';
 const ASSETS = ['./', './index.html', './app.js', './receipt.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 const OCR_HOSTS = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com'];

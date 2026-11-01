@@ -266,3 +266,39 @@ body.dropping::after {
 select.in.cur { width: 112px; text-transform: none; padding-right: 4px; font-size: 17px; }
 #destPick .chip { font-size: 13.5px; }
 .amount-hero select.in.cur { width: 126px; flex: none; font-size: 17px; text-align: left; padding: 0 6px 0 10px; }
+
+/* Currency picker */
+.amount-hero { position: relative; }
+.cur-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 14px; min-width: 118px;
+  border: 1px solid var(--line); border-radius: 11px; background: var(--paper); color: var(--ink);
+  font-family: var(--mono); font-size: 18px;
+}
+.cur-btn b { font-weight: 600; letter-spacing: .02em; }
+.cur-btn svg { margin-left: auto; color: var(--muted); }
+.cur-btn:hover, .cur-btn[aria-expanded="true"] { border-color: var(--accent); }
+.cur-btn.auto { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 55%, var(--paper)); }
+.cflag { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 1.15em; line-height: 1; }
+.cur-pop {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(360px, calc(100vw - 32px));
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .18); display: grid; gap: 12px;
+}
+.cur-pop .in { padding: 9px 12px; font-size: 15px; }
+.csec { display: grid; gap: 6px; }
+.clabel { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.cchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cchip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 99px;
+  border: 1px solid var(--line); background: var(--paper); font-family: var(--mono); font-size: 14.5px; font-weight: 600;
+}
+.cchip small { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 600; font-size: 11px; color: var(--muted); }
+.cchip.on, .crow.on { border-color: var(--accent); background: var(--accent-soft); }
+.clist { max-height: 200px; overflow-y: auto; display: grid; gap: 2px; margin: 0 -4px; padding: 0 4px; overscroll-behavior: contain; }
+.crow {
+  display: flex; align-items: center; gap: 10px; text-align: left; padding: 7px 8px; border: 1px solid transparent;
+  border-radius: 9px; background: none; font-size: 14px;
+}
+.crow:hover { background: var(--paper); }
+.crow b { font-family: var(--mono); font-weight: 600; width: 38px; flex: none; }
+.crow span:last-child { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
