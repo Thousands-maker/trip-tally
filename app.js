@@ -283,11 +283,11 @@ function renderHome() {
   const cards = gs.map(g => {
     const b = balances(g), mine = g.me ? b[g.me] || 0 : null;
     const cls = mine == null ? 'zero' : mine > 0 ? 'pos' : mine < 0 ? 'neg' : 'zero';
-    const label = mine == null ? `${g.tx.length} item${g.tx.length === 1 ? '' : 's'}` : mine > 0 ? 'you are owed' : mine < 0 ? 'you owe' : 'settled up';
+    const label = !g.tx.length ? 'no expenses yet' : mine == null ? `${g.tx.length} item${g.tx.length === 1 ? '' : 's'}` : mine > 0 ? 'you are owed' : mine < 0 ? 'you owe' : 'settled up';
     return `<li><a class="row" href="#/g/${g.id}" style="color:inherit;text-decoration:none">
       <span class="avatar">${esc(initial(g.name))}</span>
       <span class="grow"><span class="t" style="display:block">${esc(g.name)}</span>
-      <span class="s" style="display:block">${g.members.length} travellers · ${esc(g.base)} · ${fmt(groupSpend(g), g.base)} spent</span></span>
+      <span class="s" style="display:block">${(g.dest || []).map(flag).join(' ')}${g.dest?.length ? ' · ' : ''}${g.members.length} travellers${g.tx.length ? ` · ${fmt(groupSpend(g), g.base)} spent` : ''}</span></span>
       <span class="amt ${cls}">${mine ? fmt(Math.abs(mine), g.base) : ''}<small>${label}</small></span></a></li>`;
   }).join('');
 
@@ -424,10 +424,11 @@ function renderGroup(g, tab) {
 function activityTab(g) {
   const b = balances(g), mine = g.me ? b[g.me] || 0 : 0;
   const hero = `<div class="card hero">
-    <span class="label">${!g.me ? 'Total group spend' : mine > 0 ? 'Overall, you are owed' : mine < 0 ? 'Overall, you owe' : 'You are all settled up'}</span>
+    <span class="label">${!g.me ? 'Total group spend' : mine > 0 ? 'Overall, you are owed' : mine < 0 ? 'Overall, you owe' : g.tx.length ? 'You are all settled up' : 'No expenses yet'}</span>
     <span class="big ${!g.me ? '' : mine > 0 ? 'pos' : mine < 0 ? 'neg' : 'zero'}">${fmt(g.me ? Math.abs(mine) : groupSpend(g), g.base)}</span>
     ${g.me ? `<span class="label">Trip total ${fmt(groupSpend(g), g.base)} · your share ${fmt(consumed(g)[g.me] || 0, g.base)}</span>` : ''}</div>`;
-  if (!g.tx.length) return hero + `<div class="empty"><h3>No expenses yet</h3><p>Tap “Add expense” to log the first receipt.</p></div>`;
+  if (!g.tx.length) return `<div class="card empty"><div style="font-size:38px;margin-bottom:4px">🧾</div><h3>No expenses yet</h3>
+    <p>Tap “Add expense” and scan your first receipt${destCurs(g).some(c => c !== g.base && !g.rates[c]) ? ' — or set your exchange rates on the Rates tab before you go' : ''}.</p></div>`;
 
   const sorted = [...g.tx].sort((a, c) => (c.date || '').localeCompare(a.date || '') || c.createdAt - a.createdAt);
   let lastMonth = '', html = hero;
@@ -501,14 +502,15 @@ function balancesTab(g) {
     const bar = `<div class="bal-bar"><i style="background:var(${v >= 0 ? '--owed' : '--owe'});${v >= 0 ? 'left:50%' : `left:${50 - w}%`};width:${w}%"></i></div>`;
     return `<li class="row"><span class="avatar">${esc(initial(m.name))}</span>
       <span class="grow"><span class="t" style="display:block">${esc(m.name)}${m.id === g.me ? ' <span class="tag">you</span>' : ''}</span>${bar}</span>
-      <span class="amt ${cls}">${v ? fmt(Math.abs(v), g.base) : '—'}<small>${v > 0 ? 'gets back' : v < 0 ? 'owes' : 'settled'}</small></span></li>`;
+      <span class="amt ${cls}">${v ? fmt(Math.abs(v), g.base) : '—'}<small>${v > 0 ? 'gets back' : v < 0 ? 'owes' : g.tx.length ? 'settled' : ''}</small></span></li>`;
   }).join('');
   const planHtml = plan.length ? `<ul class="list card">${plan.map((p, i) => `<li class="row">
       <span class="grow"><span class="t" style="display:block">${esc(mname(g, p.from))} → ${esc(mname(g, p.to))}</span>
       <span class="s amt" style="display:block;text-align:left">${fmt(p.amount, g.base)}</span></span>
       <button class="btn small" data-settle="${i}">Record</button></li>`).join('')}</ul>
       <p class="note">Fewest payments needed to clear every balance. “Record” logs it as a payment in ${esc(g.base)}.</p>` :
-    `<div class="card empty" style="padding:24px"><h3>All settled up</h3><p style="margin:0">Nobody owes anything.</p></div>`;
+    (g.tx.length ? `<div class="card empty" style="padding:24px"><h3>All settled up</h3><p style="margin:0">Nobody owes anything.</p></div>`
+      : `<div class="card empty" style="padding:24px"><p style="margin:0">Nothing to settle yet — add the first expense.</p></div>`);
   return `<div class="section-h"><h2>Balances in ${esc(g.base)}</h2></div><ul class="list card">${rows}</ul>
     <div class="section-h"><h2>Settle up</h2><button class="btn small" id="manualPay">+ Payment</button></div>${planHtml}
     ${summaryHtml(g)}`;
@@ -1097,7 +1099,7 @@ function exportCSV(g) {
 async function shareSummary(g) {
   const plan = settlePlan(balances(g), g.base);
   const text = `✈️ ${g.name} — ${fmt(groupSpend(g), g.base)} spent\n` +
-    (plan.length ? plan.map(p => `• ${mname(g, p.from)} pays ${mname(g, p.to)} ${fmt(p.amount, g.base)}`).join('\n') : 'All settled up!');
+    (plan.length ? plan.map(p => `• ${mname(g, p.from)} pays ${mname(g, p.to)} ${fmt(p.amount, g.base)}`).join('\n') : (g.tx.length ? 'All settled up!' : 'No expenses yet.'));
   try {
     if (navigator.share) await navigator.share({ text });
     else { await navigator.clipboard.writeText(text); toast('Summary copied'); }

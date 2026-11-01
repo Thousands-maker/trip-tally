@@ -1,5 +1,5 @@
 /* Offline support: cache the app shell, plus the receipt reader once it has been downloaded. */
-const CACHE = 'trip-tally-v5';
+const CACHE = 'trip-tally-v6';
 const OCR_CACHE = 'trip-tally-ocr-v1';
 const ASSETS = ['./', './index.html', './app.js', './receipt.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 const OCR_HOSTS = ['cdn.jsdelivr.net', 'tessdata.projectnaptha.com'];
