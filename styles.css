@@ -263,3 +263,6 @@ body.dropping::after {
 .spots small { color: var(--muted); font-family: var(--mono); }
 .section-h .link { font-size: 13.5px; text-transform: none; letter-spacing: 0; }
 .kv .btn { white-space: nowrap; flex: none; }
+select.in.cur { width: 112px; text-transform: none; padding-right: 4px; font-size: 17px; }
+#destPick .chip { font-size: 13.5px; }
+.amount-hero select.in.cur { width: 126px; flex: none; font-size: 17px; text-align: left; padding: 0 6px 0 10px; }

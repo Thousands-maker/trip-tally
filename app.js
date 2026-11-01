@@ -193,7 +193,8 @@ sheet.addEventListener('click', e => { if (e.target === sheet) sheet.close(); })
 const settings = () => (S.settings || (S.settings = {}));
 function localCurrency(g) { // abroad (phone's time zone uses another currency)? default to that
   const c = tzCurrency();
-  return c && validCur(c) && c !== g.base ? c : (g.lastCur || g.base);
+  if (c && validCur(c) && c !== g.base) return c;
+  return g.lastCur || destCurs(g).find(x => x !== g.base) || g.base;
 }
 const trailOn = () => !!settings().trail;
 function getPos(maxAge = 60e3) {
@@ -233,7 +234,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) reco
 /* receipt reader: fetch it once (while online) so it also works offline */
 function markOcrReady() { if (!settings().ocrReady) { settings().ocrReady = true; save(); } }
 async function preloadOcr(g, onStatus = () => {}) {
-  const langs = g?.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([tzCurrency(), g?.base, ...Object.keys(g?.rates || {})].filter(Boolean));
+  const langs = g?.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([tzCurrency(), g?.base, ...(g ? tripCurs(g) : [])].filter(Boolean));
   try {
     onStatus('Downloading receipt reader…');
     const c = document.createElement('canvas'); c.width = c.height = 32;
@@ -332,18 +333,66 @@ async function checkPersist() {
   el.className = p ? 'pos' : 'zero';
 }
 
+/* ---------- countries & currencies ---------- */
+const COUNTRIES = [
+  ['AR', 'Argentina', 'ARS'], ['AU', 'Australia', 'AUD'], ['AT', 'Austria', 'EUR'], ['BE', 'Belgium', 'EUR'], ['BR', 'Brazil', 'BRL'],
+  ['BN', 'Brunei', 'BND'], ['KH', 'Cambodia', 'KHR'], ['CA', 'Canada', 'CAD'], ['CL', 'Chile', 'CLP'], ['CN', 'China', 'CNY'],
+  ['CO', 'Colombia', 'COP'], ['HR', 'Croatia', 'EUR'], ['CZ', 'Czechia', 'CZK'], ['DK', 'Denmark', 'DKK'], ['EG', 'Egypt', 'EGP'],
+  ['FJ', 'Fiji', 'FJD'], ['FI', 'Finland', 'EUR'], ['FR', 'France', 'EUR'], ['GE', 'Georgia', 'GEL'], ['DE', 'Germany', 'EUR'],
+  ['GR', 'Greece', 'EUR'], ['HK', 'Hong Kong', 'HKD'], ['HU', 'Hungary', 'HUF'], ['IS', 'Iceland', 'ISK'], ['IN', 'India', 'INR'],
+  ['ID', 'Indonesia', 'IDR'], ['IE', 'Ireland', 'EUR'], ['IL', 'Israel', 'ILS'], ['IT', 'Italy', 'EUR'], ['JP', 'Japan', 'JPY'],
+  ['JO', 'Jordan', 'JOD'], ['KZ', 'Kazakhstan', 'KZT'], ['LA', 'Laos', 'LAK'], ['MO', 'Macau', 'MOP'], ['MY', 'Malaysia', 'MYR'],
+  ['MV', 'Maldives', 'MVR'], ['MX', 'Mexico', 'MXN'], ['MN', 'Mongolia', 'MNT'], ['MA', 'Morocco', 'MAD'], ['MM', 'Myanmar', 'MMK'],
+  ['NP', 'Nepal', 'NPR'], ['NL', 'Netherlands', 'EUR'], ['NZ', 'New Zealand', 'NZD'], ['NO', 'Norway', 'NOK'], ['PE', 'Peru', 'PEN'],
+  ['PH', 'Philippines', 'PHP'], ['PL', 'Poland', 'PLN'], ['PT', 'Portugal', 'EUR'], ['QA', 'Qatar', 'QAR'], ['SA', 'Saudi Arabia', 'SAR'],
+  ['SG', 'Singapore', 'SGD'], ['ZA', 'South Africa', 'ZAR'], ['KR', 'South Korea', 'KRW'], ['ES', 'Spain', 'EUR'], ['LK', 'Sri Lanka', 'LKR'],
+  ['SE', 'Sweden', 'SEK'], ['CH', 'Switzerland', 'CHF'], ['TW', 'Taiwan', 'TWD'], ['TH', 'Thailand', 'THB'], ['TR', 'Türkiye', 'TRY'],
+  ['AE', 'United Arab Emirates', 'AED'], ['GB', 'United Kingdom', 'GBP'], ['US', 'United States', 'USD'], ['UZ', 'Uzbekistan', 'UZS'], ['VN', 'Vietnam', 'VND']
+].map(([cc, name, cur]) => ({ cc, name, cur }));
+const country = cc => COUNTRIES.find(c => c.cc === cc);
+const flag = cc => String.fromCodePoint(...[...cc].map(ch => 0x1F1E6 + ch.charCodeAt(0) - 65));
+const ALL_CURS = [...new Set([...COMMON, ...COUNTRIES.map(c => c.cur)])].filter(validCur).sort();
+const destCurs = g => [...new Set((g.dest || []).map(cc => country(cc)?.cur).filter(Boolean))];
+const tripCurs = g => [...new Set([...destCurs(g), g.base, ...Object.keys(g.rates || {}), ...(g.tx || []).map(t => t.currency)])];
+function curLabel(g, c) {
+  const cc = (g.dest || []).find(x => country(x)?.cur === c);
+  return `${cc ? flag(cc) : c === g.base ? '🏠' : '💱'} ${c}`;
+}
+// expense currency: the trip's destination currencies + home, then anything already used; "Other…" for the rest
+function curSelect(g, value) {
+  const list = [...destCurs(g).filter(c => c !== g.base), g.base, ...tripCurs(g)];
+  if (value && validCur(value)) list.push(value);
+  return `<select class="in cur" name="currency" aria-label="Currency">${[...new Set(list)].map(c => `<option value="${c}" ${c === value ? 'selected' : ''}>${curLabel(g, c)}</option>`).join('')}<option value="__other">Other…</option></select>`;
+}
+function homeSelect(name, value, extra = '') {
+  return `<select class="in" name="${name}" ${extra}>${ALL_CURS.map(c => { const k = COUNTRIES.filter(x => x.cur === c); return `<option value="${c}" ${c === value ? 'selected' : ''}>${c}${k.length === 1 ? ` — ${k[0].name}` : c === 'EUR' ? ' — Euro' : ''}</option>`; }).join('')}</select>`;
+}
+// "Travelling to": chips for chosen countries + a dropdown to add more
+function destPicker(root, sel, onChange) {
+  const draw = () => {
+    root.innerHTML = `${sel.length ? `<div class="chips">${sel.map(cc => `<button type="button" class="chip" aria-pressed="true" data-rmdest="${cc}" aria-label="Remove ${esc(country(cc).name)}">${flag(cc)} ${esc(country(cc).name)} · ${country(cc).cur} ✕</button>`).join('')}</div>` : ''}
+      <select class="in" data-adddest><option value="">${sel.length ? '+ Add another country…' : 'Choose a country…'}</option>${COUNTRIES.filter(c => !sel.includes(c.cc)).map(c => `<option value="${c.cc}">${flag(c.cc)} ${c.name} (${c.cur})</option>`).join('')}</select>`;
+    $('[data-adddest]', root).onchange = e => { if (e.target.value) { sel.push(e.target.value); onChange(sel); draw(); } };
+    $$('[data-rmdest]', root).forEach(b => b.onclick = () => { sel.splice(sel.indexOf(b.dataset.rmdest), 1); onChange(sel); draw(); });
+  };
+  draw();
+}
+
 function curInput(name, value, extra = '') {
   return `<input class="in cur" name="${name}" value="${esc(value)}" list="curList" maxlength="3" autocomplete="off" autocapitalize="characters" spellcheck="false" ${extra}>
     <datalist id="curList">${COMMON.map(c => `<option value="${c}">`).join('')}</datalist>`;
 }
 
 function newGroupSheet() {
+  const newDest = [];
   openSheet('New trip', `
     <label class="f">Trip name<input class="in" name="name" required placeholder="e.g. Tokyo, Dec 2026"></label>
-    <label class="f">Home currency (balances are settled in this)<div class="pair">${curInput('base', 'SGD')}</div></label>
+    <div class="f">Travelling to<div id="destPick" class="stack" style="gap:8px"></div></div>
+    <label class="f">Your home currency (everyone settles up in this)${homeSelect('base', (tzCurrency() && ALL_CURS.includes(tzCurrency())) ? tzCurrency() : 'SGD')}</label>
     <label class="f">Your name<input class="in" name="me" placeholder="Me" value="Me"></label>
     <label class="f">Travel buddies — one name per line<textarea class="in" name="others" placeholder="Alex&#10;Sam&#10;Priya"></textarea></label>`, {
     submit: 'Start trip',
+    onMount: () => { destPicker($('#destPick'), newDest, () => {}); sheetForm.elements.name.focus(); },
     onSubmit() {
       const f = sheetForm.elements, name = f.name.value.trim(), base = f.base.value.trim().toUpperCase();
       if (!name) { f.name.classList.add('invalid'); f.name.focus(); return false; }
@@ -351,12 +400,11 @@ function newGroupSheet() {
       const meName = f.me.value.trim() || 'Me';
       const others = f.others.value.split(/\n|,/).map(s => s.trim()).filter(Boolean);
       const me = { id: uid(), name: meName };
-      const g = { id: uid(), name, base, members: [me, ...others.map(n => ({ id: uid(), name: n }))], me: me.id, rates: {}, tx: [], createdAt: Date.now() };
+      const g = { id: uid(), name, base, members: [me, ...others.map(n => ({ id: uid(), name: n }))], me: me.id, dest: [...newDest], rates: {}, tx: [], createdAt: Date.now() };
       S.groups.unshift(g); save();
       if (navigator.onLine && !settings().ocrReady) setTimeout(() => preloadOcr(g), 1500);
       location.hash = `#/g/${g.id}`;
-    },
-    onMount: () => sheetForm.elements.name.focus()
+    }
   });
 }
 
@@ -488,19 +536,19 @@ function summaryHtml(g) {
 
 function ratesTab(g) {
   const used = [...new Set(g.tx.map(t => t.currency).filter(c => c !== g.base))];
-  const curs = [...new Set([...Object.keys(g.rates), ...used])].sort();
+  const curs = [...new Set([...destCurs(g).filter(c => c !== g.base), ...Object.keys(g.rates), ...used])];
   const rows = curs.map(c => {
     const r = g.rates[c];
     const n = g.tx.filter(t => t.currency === c).length;
     return `<li class="pad stack" data-cur="${c}">
       ${rateLine(g, c, r)}
       <div class="btn-row">${n ? `<button class="btn small" data-apply="${c}">Use for all ${n} ${c} item${n === 1 ? '' : 's'}</button>` : ''}
-      <button class="btn small danger" data-delrate="${c}" ${n ? 'disabled title="In use"' : ''}>Remove</button></div></li>`;
+      ${destCurs(g).includes(c) ? '' : `<button class="btn small danger" data-delrate="${c}" ${n ? 'disabled title="In use"' : ''}>Remove</button>`}</div></li>`;
   }).join('');
   return `<div class="section-h"><h2>Exchange rates → ${esc(g.base)}</h2></div>
     ${curs.length ? `<ul class="list card">${rows}</ul>` : `<div class="card empty" style="padding:24px"><p style="margin:0">No foreign currencies yet. Add one below, or just pick a currency when you add an expense.</p></div>`}
     <div class="card pad stack" style="margin-top:12px">
-      <div class="pair">${curInput('newCur', '', 'id="newCur" placeholder="USD"')}<input class="in num grow" id="newRate" inputmode="decimal" placeholder="in ${esc(g.base)}"><button class="btn" id="addRate">Add</button></div>
+      <div class="pair">${curInput('newCur', '', 'id="newCur" placeholder="Code"')}<input class="in num grow" id="newRate" inputmode="decimal" placeholder="in ${esc(g.base)}"><button class="btn" id="addRate">Add</button></div>
     </div>
     <p class="note">You set the rates — nothing is fetched from the internet. Each expense keeps the rate it was entered with, so changing a rate here only affects new expenses unless you tap “Use for all”.</p>`;
 }
@@ -508,7 +556,7 @@ function ratesTab(g) {
 const rateDirs = {};
 const nice = v => +(+v).toPrecision(6);
 function rateLine(g, c, r) {
-  const dir = rateDirs[g.id + c] || (r && r < 1 ? 'inv' : 'fwd');
+  const dir = rateDirs[g.id + c] || (r ? (r < 1 ? 'inv' : 'fwd') : (digits(c) === 0 && digits(g.base) > 0 ? 'inv' : 'fwd'));
   const shown = r ? (dir === 'fwd' ? nice(r) : nice(1 / r)) : '';
   return `<div class="rate-line"><span>1 ${dir === 'fwd' ? c : esc(g.base)} =</span><input class="in num" inputmode="decimal" data-rate="${c}" data-dir="${dir}" value="${shown}" placeholder="rate"><span>${dir === 'fwd' ? esc(g.base) : c}</span>
       <button type="button" class="swap" data-flip="${c}" aria-label="Flip rate direction">⇄</button></div>
@@ -526,7 +574,8 @@ function peopleTab(g) {
       <label class="f">Name<input class="in" id="gName" value="${esc(g.name)}"></label>
       <label class="f">Which one is you?<select class="in" id="gMe"><option value="">— not travelling (just tracking) —</option>
         ${g.members.map(m => `<option value="${m.id}" ${m.id === g.me ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
-      <label class="f">Home currency<div class="pair">${curInput('gBase', g.base, `id="gBase" ${g.tx.length ? 'disabled' : ''}`)}</div></label>
+      <div class="f">Travelling to<div id="destPick" class="stack" style="gap:8px"></div></div>
+      <label class="f">Home currency${homeSelect('gBase', g.base, `id="gBase" ${g.tx.length ? 'disabled' : ''}`)}</label>
       ${g.tx.length ? '<span class="note" style="margin:0">Home currency is locked once a trip has expenses.</span>' : ''}
     </div>
     <div class="section-h"><h2>Travellers</h2></div>
@@ -534,7 +583,7 @@ function peopleTab(g) {
       <div class="member-row" style="border-top:1px solid var(--line)"><input class="in" id="newMember" placeholder="Add a traveller"><button class="btn small" id="addMember">Add</button></div></div>
     <div class="section-h"><h2>Receipt languages</h2></div>
     <div class="card pad stack">
-      <div class="chips">${Object.entries(OCR_LANGS).map(([k, l]) => `<button type="button" class="chip" data-lang="${k}" aria-pressed="${(g.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([tzCurrency(), g.base, ...Object.keys(g.rates)].filter(Boolean))).includes(k)}">${l}</button>`).join('')}</div>
+      <div class="chips">${Object.entries(OCR_LANGS).map(([k, l]) => `<button type="button" class="chip" data-lang="${k}" aria-pressed="${(g.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([tzCurrency(), ...tripCurs(g)].filter(Boolean))).includes(k)}">${l}</button>`).join('')}</div>
       <span class="note" style="margin:0">${g.ocrLangs?.length ? 'Chosen by you. ' : 'Picked automatically from the currencies on this trip and where your phone is. '}Pick up to 3 — more languages make reading slower. Each downloads once.</span>
     </div>
     <div class="section-h"><h2>Export</h2></div>
@@ -588,6 +637,8 @@ function bindGroup(g, tab) {
   if (tab === 'people') {
     $('#gName').onchange = e => { const v = e.target.value.trim(); if (v) { g.name = v; save(); setBar(g.name, '#/'); } };
     $('#gMe').onchange = e => { g.me = e.target.value || null; save(); };
+    g.dest = g.dest || [];
+    destPicker($('#destPick'), g.dest, () => save());
     const gb = $('#gBase'); if (gb) gb.onchange = e => {
       const v = e.target.value.trim().toUpperCase();
       if (validCur(v)) { delete g.rates[v]; g.base = v; save(); toast('Home currency set to ' + v); } else { toast('Use a 3-letter code'); e.target.value = g.base; }
@@ -600,7 +651,7 @@ function bindGroup(g, tab) {
     $('#addMember').onclick = addM;
     $('#newMember').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addM(); } };
     $$('[data-lang]').forEach(b => b.onclick = () => {
-      const cur = g.ocrLangs?.length ? [...g.ocrLangs] : ocrLangsFor([tzCurrency(), g.base, ...Object.keys(g.rates)].filter(Boolean));
+      const cur = g.ocrLangs?.length ? [...g.ocrLangs] : ocrLangsFor([tzCurrency(), ...tripCurs(g)].filter(Boolean));
       const k = b.dataset.lang, on = cur.includes(k);
       const next = on ? cur.filter(x => x !== k) : [...cur, k];
       if (!next.length) return toast('Keep at least one language');
@@ -635,7 +686,8 @@ function txSheet(g, existing, preset = {}) {
   const keptReceipts = [...(t.receipts || [])]; // ids already stored
   const newReceipts = []; // { id, blob }
   let commit = () => false;
-  let rateDir = t.rate && t.rate < 1 ? 'inv' : 'fwd'; // fwd: 1 CUR = x BASE ; inv: 1 BASE = x CUR
+  const naturalDir = c => (digits(c) === 0 && digits(g.base) > 0 ? 'inv' : 'fwd'); // "1 SGD = 115 JPY" reads better than "1 JPY = 0.0087 SGD"
+  let rateDir = t.rate ? (t.rate < 1 ? 'inv' : 'fwd') : naturalDir(t.currency); // fwd: 1 CUR = x BASE ; inv: 1 BASE = x CUR
   const memberOpts = sel => g.members.map(m => `<option value="${m.id}" ${m.id === sel ? 'selected' : ''}>${esc(m.name)}${m.id === g.me ? ' (you)' : ''}</option>`).join('');
 
   const MODES = [['equal', 'equally'], ['items', 'by item (itemised receipt)'], ['exact', 'by exact amounts'], ['percent', 'by percentage'], ['shares', 'by shares']];
@@ -644,7 +696,7 @@ function txSheet(g, existing, preset = {}) {
       <div class="thumbs" id="thumbs"></div>
       <label class="drop-cta"><input type="file" accept="image/*" multiple id="rcptIn" hidden>📷 <b>${t.type === 'payment' ? 'Add a photo' : 'Scan a receipt'}</b><span class="drop-hint">${t.type === 'payment' ? 'or drag &amp; drop / paste' : 'fills in the details for you · or drag &amp; drop / paste'}</span></label>
       <div class="scan" id="scan" hidden></div></div>
-    <div class="amount-hero">${curInput('currency', t.currency)}<input class="in num" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off" aria-label="Amount"></div>
+    <div class="amount-hero">${curSelect(g, t.currency)}<input class="in num" name="amount" inputmode="decimal" value="${t.amount === '' ? '' : t.amount}" placeholder="0.00" autocomplete="off" aria-label="Amount"></div>
     <div class="rate-box" id="rateBox">
       <div class="rate-line"><span id="rateL"></span><input class="in num" name="rate" inputmode="decimal" autocomplete="off" aria-label="Exchange rate"><span id="rateR"></span>
         <button type="button" class="swap" id="swapDir" aria-label="Flip rate direction">⇄</button></div>
@@ -715,9 +767,20 @@ function txSheet(g, existing, preset = {}) {
         h.textContent = (rateDir === 'fwd' ? `1 ${g.base} = ${nice(1 / r)} ${c}` : `1 ${c} = ${nice(r)} ${g.base}`) +
           (a > 0 ? ` · ${fmt(a, c)} ≈ ${fmt(a * r, g.base)}` : '');
       };
+      let prevCur = t.currency;
+      const setCurrency = c => { // make sure the dropdown has it, then select it
+        if (![...F.currency.options].some(o => o.value === c)) F.currency.lastElementChild.before(new Option(curLabel(g, c), c));
+        F.currency.value = c;
+      };
       F.currency.oninput = () => {
-        const c = cur(); F.currency.classList.toggle('invalid', c.length === 3 && !validCur(c));
-        if (validCur(c)) { t.currency = c; t.rate = c === g.base ? '' : (g.rates[c] || ''); if (t.rate) rateDir = t.rate < 1 ? 'inv' : 'fwd'; showRate(); drawSplit(); }
+        if (F.currency.value === '__other') {
+          const v = (prompt('Currency code (3 letters, e.g. USD, EUR, JPY):') || '').trim().toUpperCase();
+          if (!validCur(v)) { if (v) toast('That isn’t a currency code'); F.currency.value = prevCur; return; }
+          setCurrency(v);
+        }
+        prevCur = F.currency.value;
+        const c = cur();
+        if (validCur(c)) { t.currency = c; t.rate = c === g.base ? '' : (g.rates[c] || ''); rateDir = t.rate ? (t.rate < 1 ? 'inv' : 'fwd') : naturalDir(c); showRate(); drawSplit(); }
       };
       F.rate.oninput = () => {
         const v = parseNum(F.rate.value);
@@ -870,7 +933,7 @@ function txSheet(g, existing, preset = {}) {
         if (ex?.gps) setLoc({ ...ex.gps, src: 'photo' });
         let r = null, err = null;
         try {
-          const langs = g.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([C(), tzCurrency(), g.base, ...Object.keys(g.rates)].filter(Boolean));
+          const langs = g.ocrLangs?.length ? g.ocrLangs : ocrLangsFor([C(), tzCurrency(), ...tripCurs(g)].filter(Boolean));
           const text = await ocrImage(file, langs, m => {
             if (m.status === 'recognizing text') say(`<span class="spin"></span> Reading receipt… ${Math.round(m.progress * 100)}%`, 'busy');
             else if (/load|initiali/i.test(m.status)) say('<span class="spin"></span> Getting the receipt reader ready (first time only)…', 'busy');
@@ -884,7 +947,7 @@ function txSheet(g, existing, preset = {}) {
           if (touched.has(name) || val == null || val === '') return false;
           F[name].value = val; F[name].classList.add('auto'); F[name].classList.remove('need', 'invalid'); return true;
         };
-        if (r?.currency && validCur(r.currency) && !touched.has('currency') && !touched.has('amount') && r.currency !== cur()) { F.currency.value = r.currency; F.currency.oninput(); F.currency.classList.add('auto'); }
+        if (r?.currency && validCur(r.currency) && !touched.has('currency') && !touched.has('amount') && r.currency !== cur()) { setCurrency(r.currency); F.currency.oninput(); F.currency.classList.add('auto'); }
         if (r?.total && fill('amount', roundC(r.total, C()))) { got.push(`total ${fmt(r.total, C())}${r.guessed ? ' (best guess)' : ''}`); rateHint(); refresh(); }
         if (r?.merchant && fill('desc', r.merchant)) got.push(`“${esc(r.merchant)}”`);
         const d = r?.date || ex?.date;
